@@ -7,14 +7,17 @@ TODO:
   - nice to have: add `atmosphere logs` command to see logs of specific services
 
 Usage:
+
 	atmosphere [command]
 
 Available Commands:
+
 	deploy      Deploy infrastructure components
 	ovn-nbctl   Execute ovn-nbctl commands on the OVN northbound database
 	ovn-sbctl   Execute ovn-sbctl commands on the OVN southbound database
 
 Examples:
+
 	# Deploy all components
 	atmosphere deploy
 

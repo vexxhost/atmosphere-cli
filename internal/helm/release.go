@@ -36,7 +36,7 @@ func (r *Release) GetActionConfig() (*action.Configuration, error) {
 	actionConfig.RegistryClient = registryClient
 
 	if err := actionConfig.Init(r.RESTClientGetter, r.Namespace, "secret", func(format string, args ...interface{}) {
-		log.Debugf(format, args...)
+		log.With("namespace", r.Namespace).With("release", r.Name).With("version", r.ChartVersion).Debugf(format, args...)
 	}); err != nil {
 		log.Fatal("Failed to initialize Helm action config", "error", err)
 	}

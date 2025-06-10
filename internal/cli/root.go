@@ -21,6 +21,8 @@ func NewRootCommand() *cobra.Command {
 	configFlags.AddFlags(rootCmd.PersistentFlags())
 
 	rootCmd.AddCommand(NewDeployCommand())
+	rootCmd.AddCommand(newOVNNbctlCmd(configFlags))
+	rootCmd.AddCommand(newOVNSbctlCmd(configFlags))
 
 	return rootCmd
 }

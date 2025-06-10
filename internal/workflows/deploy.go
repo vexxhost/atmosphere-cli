@@ -83,12 +83,12 @@ func CreateDeployWorkflow(configFlags *genericclioptions.ConfigFlags) *flow.Task
 	})
 
 	// Example from OCI	registry
-	// tf.NewDeployHelmChartFlow(&helm.Release{
-	// 	RESTClientGetter: configFlags,
-	// 	ChartName:        "oci://registry-1.docker.io/bitnamicharts/memcached:7.8.5",
-	// 	Namespace:        "openstack",
-	// 	Name:             "memcached",
-	// })
+	tf.NewDeployHelmChartFlow(&helm.Release{
+		RESTClientGetter: configFlags,
+		ChartName:        "oci://registry-1.docker.io/bitnamicharts/memcached:7.8.5",
+		Namespace:        "openstack",
+		Name:             "memcached",
+	})
 
 	// taskB := tf.NewDeployHelmChartTask("./charts/b", actionConfig)
 	// taskC := tf.NewDeployHelmChartTask("./charts/c", actionConfig)

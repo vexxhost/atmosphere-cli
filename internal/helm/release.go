@@ -42,6 +42,10 @@ func (r *Release) GetActionConfig() (*action.Configuration, error) {
 		log.Fatal("Failed to initialize Helm action config", "error", err)
 	}
 
+	if err := actionConfig.KubeClient.IsReachable(); err != nil {
+		return nil, err
+	}
+
 	return actionConfig, nil
 }
 

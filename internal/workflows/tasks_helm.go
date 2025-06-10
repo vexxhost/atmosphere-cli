@@ -40,13 +40,13 @@ func InstallHelmReleaseTask(sf *flow.Subflow, release *helm.Release) *flow.Task 
 
 func UpgradeHelmReleaseTask(sf *flow.Subflow, release *helm.Release) *flow.Task {
 	return sf.NewTask(fmt.Sprintf("upgrade-release-%s", release.Name), func() {
-		log.Info("Upgrading release", "name", release.Name)
+		log.Info("Checking for changes in release", "name", release.Name)
 
 		release, err := release.Upgrade()
 		if err != nil {
 			log.Fatal("Upgrade failed", "error", err)
 		}
 
-		log.Info("Successfully upgraded release", "name", release.Name, "version", release.Version)
+		log.Info("Upgrade process completed", "name", release.Name, "version", release.Version)
 	})
 }

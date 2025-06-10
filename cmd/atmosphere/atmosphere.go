@@ -4,24 +4,33 @@ import (
 	"os"
 
 	"github.com/charmbracelet/log"
-	"github.com/knadh/koanf/providers/structs"
-	"github.com/knadh/koanf/v2"
+	"github.com/spf13/viper"
 	"github.com/vexxhost/atmosphere/internal/cli"
-	"github.com/vexxhost/atmosphere/internal/config"
 )
 
-var k = koanf.New(".")
-
 func main() {
+	viper.SetConfigName("atmosphere")
+	viper.SetConfigType("toml")
+
+	viper.AddConfigPath(".")
+	viper.AddConfigPath("/etc/atmosphere/")
+
+	viper.SetEnvPrefix("ATMOSPHERE")
+	viper.AutomaticEnv()
+
 	log.SetLevel(log.DebugLevel)
+	log.SetReportTimestamp(true)
+	log.SetReportCaller(true)
 
-	// Load configuration
-	k.Load(structs.Provider(config.Config{}, "conf"), nil)
-
-	// TODO: Add configuration file loading when needed
-	// if err := k.Load(file.Provider("atmosphere.toml"), toml.Parser()); err != nil {
-	// 	log.Fatalf("error loading config: %v", err)
-	// }
+	if err := viper.ReadInConfig(); err != nil {
+		if _, ok := err.(viper.ConfigFileNotFoundError); ok {
+			log.Debug("No config file found, using defaults")
+		} else {
+			log.Warn("Error reading config file", "error", err)
+		}
+	} else {
+		log.Debug("Using config file", "file", viper.ConfigFileUsed())
+	}
 
 	// Create and execute the root command
 	rootCmd := cli.NewRootCommand()

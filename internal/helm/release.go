@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/charmbracelet/log"
+	"github.com/spf13/viper"
+	"github.com/vexxhost/atmosphere/internal/config"
 	"helm.sh/helm/v3/pkg/action"
 	"helm.sh/helm/v3/pkg/chart"
 	"helm.sh/helm/v3/pkg/chart/loader"
@@ -16,18 +18,21 @@ import (
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 )
 
+func SetReleaseDefault(section *viper.Viper, defaults *Release) {
+	section.SetDefault("chart.repository", defaults.ChartConfig.RepoURL)
+	section.SetDefault("chart.name", defaults.ChartConfig.Name)
+	section.SetDefault("chart.version", defaults.ChartConfig.Version)
+	section.SetDefault("release.namespace", defaults.ReleaseConfig.Namespace)
+	section.SetDefault("release.name", defaults.ReleaseConfig.Name)
+	section.SetDefault("release.values", defaults.ReleaseConfig.Values)
+}
+
 // Release represents a Helm release manager that handles install/upgrade operations
 type Release struct {
-	Namespace string
-	Name      string
-
-	RepoURL      string
-	ChartName    string
-	ChartVersion string
-
 	RESTClientGetter genericclioptions.RESTClientGetter
-	Values           map[string]interface{}
-	Version          int
+	ChartConfig      *config.ChartConfig
+	ReleaseConfig    *config.ReleaseConfig
+	Revision         int
 }
 
 func (r *Release) GetActionConfig() (*action.Configuration, error) {
@@ -39,8 +44,8 @@ func (r *Release) GetActionConfig() (*action.Configuration, error) {
 	actionConfig := new(action.Configuration)
 	actionConfig.RegistryClient = registryClient
 
-	if err := actionConfig.Init(r.RESTClientGetter, r.Namespace, os.Getenv("HELM_DRIVER"), func(format string, args ...interface{}) {
-		log.With("namespace", r.Namespace).With("release", r.Name).With("version", r.ChartVersion).Debugf(format, args...)
+	if err := actionConfig.Init(r.RESTClientGetter, r.ReleaseConfig.Namespace, os.Getenv("HELM_DRIVER"), func(format string, args ...interface{}) {
+		log.With("namespace", r.ReleaseConfig.Namespace).With("release", r.ReleaseConfig.Name).With("version", r.ChartConfig.Version).Debugf(format, args...)
 	}); err != nil {
 		log.Fatal("Failed to initialize Helm action config", "error", err)
 	}
@@ -54,7 +59,7 @@ func (r *Release) GetActionConfig() (*action.Configuration, error) {
 
 // GetChart retrieves the Helm chart based on the provided ChartPathOptions
 func (r *Release) GetChart(chartPathOptions action.ChartPathOptions) (*chart.Chart, error) {
-	chartPath, err := chartPathOptions.LocateChart(r.ChartName, cli.New())
+	chartPath, err := chartPathOptions.LocateChart(r.ChartConfig.Name, cli.New())
 	if err != nil {
 		return nil, err
 	}
@@ -71,11 +76,11 @@ func (r *Release) GetChart(chartPathOptions action.ChartPathOptions) (*chart.Cha
 func (r *Release) InstallConfig(actionConfig *action.Configuration) *action.Install {
 	install := action.NewInstall(actionConfig)
 
-	install.RepoURL = r.RepoURL
-	install.ReleaseName = r.Name
-	install.Version = r.ChartVersion
+	install.RepoURL = r.ChartConfig.RepoURL
+	install.ReleaseName = r.ReleaseConfig.Name
+	install.Version = r.ChartConfig.Version
 
-	install.Namespace = r.Namespace
+	install.Namespace = r.ReleaseConfig.Namespace
 	install.CreateNamespace = true
 
 	install.Wait = true
@@ -98,12 +103,12 @@ func (r *Release) Install() (*Release, error) {
 		return nil, err
 	}
 
-	release, err := install.Run(ch, r.Values)
+	release, err := install.Run(ch, r.ReleaseConfig.Values)
 	if err != nil {
 		return nil, err
 	}
 
-	r.Version = release.Version
+	r.Revision = release.Version
 	return r, nil
 }
 
@@ -112,10 +117,10 @@ func (r *Release) UpgradeConfig(actionConfig *action.Configuration) *action.Upgr
 	upgrade := action.NewUpgrade(actionConfig)
 
 	upgrade.Install = true
-	upgrade.RepoURL = r.RepoURL
-	upgrade.Version = r.ChartVersion
+	upgrade.RepoURL = r.ChartConfig.RepoURL
+	upgrade.Version = r.ChartConfig.Version
 
-	upgrade.Namespace = r.Namespace
+	upgrade.Namespace = r.ReleaseConfig.Namespace
 	upgrade.ResetValues = true
 	upgrade.Wait = true
 	upgrade.Timeout = 5 * time.Minute
@@ -133,13 +138,13 @@ func (r *Release) Upgrade() (*Release, error) {
 
 	// If no differences, skip upgrade
 	if !hasDiff {
-		log.Info("No changes detected, skipping upgrade", "name", r.Name)
+		log.Info("No changes detected, skipping upgrade", "name", r.ReleaseConfig.Name)
 		// Get current version from deployed release
 		deployedRelease, err := r.GetDeployedRelease()
 		if err != nil {
 			return nil, fmt.Errorf("failed to get deployed release: %w", err)
 		}
-		r.Version = deployedRelease.Version
+		r.Revision = deployedRelease.Version
 		return r, nil
 	}
 
@@ -155,12 +160,12 @@ func (r *Release) Upgrade() (*Release, error) {
 		return nil, err
 	}
 
-	release, err := upgrade.Run(r.Name, ch, r.Values)
+	release, err := upgrade.Run(r.ReleaseConfig.Name, ch, r.ReleaseConfig.Values)
 	if err != nil {
 		return nil, err
 	}
 
-	r.Version = release.Version
+	r.Revision = release.Version
 	return r, nil
 }
 
@@ -174,7 +179,7 @@ func (r *Release) Exists() (bool, error) {
 	history := action.NewHistory(actionConfig)
 	history.Max = 1
 
-	_, err = history.Run(r.Name)
+	_, err = history.Run(r.ReleaseConfig.Name)
 	return err == nil, nil
 }
 
@@ -186,7 +191,7 @@ func (r *Release) GetDeployedRelease() (*release.Release, error) {
 	}
 
 	get := action.NewGet(actionConfig)
-	return get.Run(r.Name)
+	return get.Run(r.ReleaseConfig.Name)
 }
 
 // GetDeployedManifests retrieves the manifests of the currently deployed release
@@ -215,7 +220,7 @@ func (r *Release) GetTemplatedManifests() (string, error) {
 		return "", err
 	}
 
-	rel, err := upgrade.Run(r.Name, ch, r.Values)
+	rel, err := upgrade.Run(r.ReleaseConfig.Name, ch, r.ReleaseConfig.Values)
 	if err != nil {
 		return "", err
 	}

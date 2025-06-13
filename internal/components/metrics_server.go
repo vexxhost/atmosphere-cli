@@ -1,6 +1,7 @@
 package components
 
 import (
+	flow "github.com/noneback/go-taskflow"
 	"github.com/spf13/viper"
 	"github.com/vexxhost/atmosphere/internal/config"
 	"github.com/vexxhost/atmosphere/internal/helm"
@@ -8,11 +9,17 @@ import (
 )
 
 // MetricsServer represents the metrics-server component
-type MetricsServer struct{}
+type MetricsServer struct {
+	*HelmComponent
+}
 
 // NewMetricsServer creates a new MetricsServer component
 func NewMetricsServer() *MetricsServer {
-	return &MetricsServer{}
+	return &MetricsServer{
+		HelmComponent: &HelmComponent{
+			Name: "metrics-server",
+		},
+	}
 }
 
 // GetRelease returns the Helm release configuration for metrics-server
@@ -48,4 +55,9 @@ func (m *MetricsServer) GetRelease(configFlags *genericclioptions.ConfigFlags) *
 		ChartConfig:      config.ChartConfigFromConfigSection(section),
 		ReleaseConfig:    config.ReleaseConfigFromConfigSection(section),
 	}
+}
+
+// GetTask returns a task for deploying metrics-server
+func (m *MetricsServer) GetTask(tf *flow.TaskFlow, configFlags *genericclioptions.ConfigFlags) *flow.Task {
+	return m.HelmComponent.GetTask(tf, configFlags, m)
 }

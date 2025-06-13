@@ -3,7 +3,6 @@ package cli
 import (
 	"fmt"
 
-	"github.com/charmbracelet/log"
 	flow "github.com/noneback/go-taskflow"
 	"github.com/spf13/cobra"
 	"github.com/vexxhost/atmosphere/internal/components"
@@ -21,27 +20,21 @@ This command handles the deployment of services, configurations, and resources.`
 			tf := flow.NewTaskFlow("deploy")
 			executor := flow.NewExecutor(10)
 
-			// Add components to deploy
-			componentsToInstall := []components.Component{
-				components.NewMetricsServer(),
-				// Add more components here as needed
-			}
+			// Create component tasks
+			metricsServer := components.NewMetricsServer()
+			_ = metricsServer.GetTask(tf, configFlags)
 
-			// Create deployment tasks
-			for _, component := range componentsToInstall {
-				release := component.GetRelease(configFlags)
-				componentName := release.ReleaseConfig.Name
-				
-				tf.NewTask(fmt.Sprintf("deploy-%s", componentName), func() {
-					log.Info("Deploying component", "name", componentName)
-					
-					if err := release.Deploy(); err != nil {
-						log.Fatal("Failed to deploy component", "name", componentName, "error", err)
-					}
-					
-					log.Info("Successfully deployed component", "name", componentName)
-				})
-			}
+			// Example: Add more components with dependencies
+			// certManager := components.NewCertManager()
+			// certManagerTask := certManager.GetTask(tf, configFlags)
+			
+			// monitoring := components.NewMonitoring()
+			// monitoringTask := monitoring.GetTask(tf, configFlags)
+			// monitoringTask.Succeed(metricsServerTask) // Monitoring depends on metrics-server
+			
+			// ingress := components.NewIngress()
+			// ingressTask := ingress.GetTask(tf, configFlags)
+			// ingressTask.Succeed(certManagerTask) // Ingress depends on cert-manager for TLS
 
 			// Execute the workflow
 			executor.Run(tf).Wait()

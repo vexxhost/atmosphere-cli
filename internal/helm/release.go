@@ -183,6 +183,39 @@ func (r *Release) Exists() (bool, error) {
 	return err == nil, nil
 }
 
+// Uninstall removes a Helm release
+func (r *Release) Uninstall() error {
+	actionConfig, err := r.GetActionConfig()
+	if err != nil {
+		return err
+	}
+
+	uninstall := action.NewUninstall(actionConfig)
+	_, err = uninstall.Run(r.ReleaseConfig.Name)
+	if err != nil {
+		return fmt.Errorf("failed to uninstall release %s: %w", r.ReleaseConfig.Name, err)
+	}
+
+	log.Info("Successfully uninstalled release", "name", r.ReleaseConfig.Name)
+	return nil
+}
+
+// Deploy installs or upgrades the release based on whether it exists
+func (r *Release) Deploy() error {
+	exists, err := r.Exists()
+	if err != nil {
+		return err
+	}
+
+	if exists {
+		_, err = r.Upgrade()
+		return err
+	}
+
+	_, err = r.Install()
+	return err
+}
+
 // GetDeployedRelease retrieves the currently deployed release
 func (r *Release) GetDeployedRelease() (*release.Release, error) {
 	actionConfig, err := r.GetActionConfig()

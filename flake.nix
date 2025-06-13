@@ -28,6 +28,7 @@
             kind
             kubectl
             kubernetes-helm
+            pre-commit
           ];
         };
       }

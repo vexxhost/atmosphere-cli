@@ -24,6 +24,7 @@ This command handles the deployment of services, configurations, and resources.`
 			// Add components to deploy
 			componentsToInstall := []components.Component{
 				components.NewMetricsServer(),
+				components.NewVault(),
 				// Add more components here as needed
 			}
 
@@ -31,14 +32,14 @@ This command handles the deployment of services, configurations, and resources.`
 			for _, component := range componentsToInstall {
 				release := component.GetRelease(configFlags)
 				componentName := release.ReleaseConfig.Name
-				
+
 				tf.NewTask(fmt.Sprintf("deploy-%s", componentName), func() {
 					log.Info("Deploying component", "name", componentName)
-					
+
 					if err := release.Deploy(); err != nil {
 						log.Fatal("Failed to deploy component", "name", componentName, "error", err)
 					}
-					
+
 					log.Info("Successfully deployed component", "name", componentName)
 				})
 			}

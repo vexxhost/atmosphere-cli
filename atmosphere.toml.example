@@ -1,0 +1,29 @@
+# atmosphere.toml - Main configuration file for Atmosphere CLI
+
+# Metrics Server Configuration
+[metrics-server]
+chart.repository = "https://kubernetes-sigs.github.io/metrics-server"
+chart.name = "metrics-server"
+chart.version = "3.12.2"
+
+release.namespace = "kube-system"
+release.name = "metrics-server"
+
+[metrics-server.release.values]
+args = [
+  "--kubelet-insecure-tls",
+]
+
+# Vault Operator Configuration
+[vault]
+chart.registry = "oci://ghcr.io/bank-vaults/helm-charts"
+chart.name = "vault-operator"
+chart.version = "1.22.6"
+
+release.namespace = "vault"
+release.name = "vault-operator"
+
+[vault.release.values]
+replicaCount = 2
+image.tag = "v1.22.6"
+bankVaults.image.tag = "v1.31.4"

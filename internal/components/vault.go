@@ -8,45 +8,50 @@ import (
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 )
 
-// MetricsServer represents the metrics-server component
-type MetricsServer struct{}
+// Vault represents the vault-operator component using bank-vaults
+type Vault struct{}
 
-// NewMetricsServer creates a new MetricsServer component
-func NewMetricsServer() *MetricsServer {
-	return &MetricsServer{}
+// NewVault creates a new Vault component
+func NewVault() *Vault {
+	return &Vault{}
 }
 
-// GetRelease returns the Helm release configuration for metrics-server
-func (m *MetricsServer) GetRelease(configFlags *genericclioptions.ConfigFlags) *helm.Release {
-	sectionName := "metrics-server"
+// GetRelease returns the Helm release configuration for vault-operator
+func (v *Vault) GetRelease(configFlags *genericclioptions.ConfigFlags) *helm.Release {
+	sectionName := "vault"
 
-	// Get the metrics-server config directly from our case-preserving TOML parser
-	msConfig := tomlconfig.GetComponentConfig(sectionName)
+	// Get the vault config directly from our case-preserving TOML parser
+	vaultConfig := tomlconfig.GetComponentConfig(sectionName)
 
 	// Default values to use if not specified in config
 	defaultValues := map[string]interface{}{
-		"args": []string{
-			"--kubelet-insecure-tls",
+		"image": map[string]interface{}{
+			"tag": "v1.22.6",
+		},
+		"bankVaults": map[string]interface{}{
+			"image": map[string]interface{}{
+				"tag": "v1.31.4",
+			},
 		},
 	}
 
 	// Default chart config
-	chartRepo := "https://kubernetes-sigs.github.io/metrics-server"
-	chartName := "metrics-server"
-	chartVersion := "3.12.2"
+	chartRegistry := "oci://ghcr.io/bank-vaults/helm-charts"
+	chartName := "vault-operator"
+	chartVersion := "1.22.6"
 
 	// Default release config
-	namespace := "kube-system"
-	releaseName := "metrics-server"
+	namespace := "vault"
+	releaseName := "vault-operator"
 
 	// Extract config values from case-preserved config
-	if msConfig != nil {
-		log.Debug("Found metrics-server config with preserved case", "config", msConfig)
+	if vaultConfig != nil {
+		log.Debug("Found vault config with preserved case", "config", vaultConfig)
 
 		// Extract chart info
-		if chart, ok := msConfig["chart"].(map[string]interface{}); ok {
-			if repo, ok := chart["repository"].(string); ok && repo != "" {
-				chartRepo = repo
+		if chart, ok := vaultConfig["chart"].(map[string]interface{}); ok {
+			if registry, ok := chart["registry"].(string); ok && registry != "" {
+				chartRegistry = registry
 			}
 			if name, ok := chart["name"].(string); ok && name != "" {
 				chartName = name
@@ -57,7 +62,7 @@ func (m *MetricsServer) GetRelease(configFlags *genericclioptions.ConfigFlags) *
 		}
 
 		// Extract release info
-		if release, ok := msConfig["release"].(map[string]interface{}); ok {
+		if release, ok := vaultConfig["release"].(map[string]interface{}); ok {
 			if ns, ok := release["namespace"].(string); ok && ns != "" {
 				namespace = ns
 			}
@@ -85,17 +90,20 @@ func (m *MetricsServer) GetRelease(configFlags *genericclioptions.ConfigFlags) *
 		}
 	}
 
-	// Create chart config
+	// Create chart config with full OCI path
+	fullChartName := chartRegistry + "/" + chartName
 	chartConfig := &config.ChartConfig{
-		RepoURL: chartRepo,
-		Name:    chartName,
+		Name:    fullChartName,
 		Version: chartVersion,
 	}
 
 	// Add config hash to enable hash-based diffing
 	values = helm.AddConfigHash(values)
 
-	// Create release config with case-preserved values
+	log.Debug("Component values for deployment",
+		"component", "vault",
+		"replicaCount", values["replicaCount"])
+
 	releaseConfig := &config.ReleaseConfig{
 		Namespace: namespace,
 		Name:      releaseName,

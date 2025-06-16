@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"github.com/vexxhost/atmosphere/internal/atmosphere"
 	"github.com/vexxhost/atmosphere/internal/helm"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
@@ -22,6 +23,7 @@ import (
 type MetricsServerTestSuite struct {
 	suite.Suite
 	configFlags   *genericclioptions.ConfigFlags
+	ctx           context.Context
 	metricsServer *MetricsServer
 	release       *helm.Release
 }
@@ -30,8 +32,9 @@ func (suite *MetricsServerTestSuite) SetupTest() {
 	viper.Reset()
 
 	suite.configFlags = genericclioptions.NewConfigFlags(true)
+	suite.ctx = atmosphere.New(context.Background(), suite.configFlags)
 	suite.metricsServer = NewMetricsServer()
-	suite.release = suite.metricsServer.GetRelease(suite.configFlags)
+	suite.release = suite.metricsServer.GetRelease(suite.ctx)
 
 	// Ensure clean state
 	exists, err := suite.release.Exists()
@@ -108,7 +111,7 @@ func (suite *MetricsServerTestSuite) TestRedeploymentDoesNotChangeRevision() {
 func (suite *MetricsServerTestSuite) TestCustomConfiguration() {
 	viper.Set("metrics-server.chart.version", "3.12.1")
 	
-	customRelease := suite.metricsServer.GetRelease(suite.configFlags)
+	customRelease := suite.metricsServer.GetRelease(suite.ctx)
 	assert.Equal(suite.T(), "3.12.1", customRelease.ChartConfig.Version)
 }
 

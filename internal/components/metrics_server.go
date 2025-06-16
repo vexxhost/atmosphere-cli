@@ -1,11 +1,13 @@
 package components
 
 import (
+	"context"
+
 	flow "github.com/noneback/go-taskflow"
 	"github.com/spf13/viper"
+	"github.com/vexxhost/atmosphere/internal/atmosphere"
 	"github.com/vexxhost/atmosphere/internal/config"
 	"github.com/vexxhost/atmosphere/internal/helm"
-	"k8s.io/cli-runtime/pkg/genericclioptions"
 )
 
 // MetricsServer represents the metrics-server component
@@ -23,9 +25,9 @@ func NewMetricsServer() *MetricsServer {
 }
 
 // GetRelease returns the Helm release configuration for metrics-server
-func (m *MetricsServer) GetRelease(configFlags *genericclioptions.ConfigFlags) *helm.Release {
+func (m *MetricsServer) GetRelease(ctx context.Context) *helm.Release {
 	sectionName := "metrics-server"
-	section := viper.Sub(sectionName)
+	section := atmosphere.ConfigSection(ctx, sectionName)
 
 	// Set defaults if no config section exists
 	if section == nil {
@@ -50,6 +52,7 @@ func (m *MetricsServer) GetRelease(configFlags *genericclioptions.ConfigFlags) *
 		},
 	})
 
+	configFlags := atmosphere.MustConfigFlags(ctx)
 	return &helm.Release{
 		RESTClientGetter: configFlags,
 		ChartConfig:      config.ChartConfigFromConfigSection(section),
@@ -58,6 +61,6 @@ func (m *MetricsServer) GetRelease(configFlags *genericclioptions.ConfigFlags) *
 }
 
 // GetTask returns a task for deploying metrics-server
-func (m *MetricsServer) GetTask(tf *flow.TaskFlow, configFlags *genericclioptions.ConfigFlags) *flow.Task {
-	return m.HelmComponent.GetTask(tf, configFlags, m)
+func (m *MetricsServer) GetTask(ctx context.Context, tf *flow.TaskFlow) *flow.Task {
+	return m.HelmComponent.GetTask(ctx, tf, m)
 }

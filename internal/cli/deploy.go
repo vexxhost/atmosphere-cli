@@ -1,10 +1,12 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 
 	flow "github.com/noneback/go-taskflow"
 	"github.com/spf13/cobra"
+	"github.com/vexxhost/atmosphere/internal/atmosphere"
 	"github.com/vexxhost/atmosphere/internal/components"
 )
 
@@ -16,24 +18,27 @@ func NewDeployCommand() *cobra.Command {
 		Long: `Deploy various Atmosphere components to your infrastructure.
 This command handles the deployment of services, configurations, and resources.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Create context with atmosphere configuration
+			ctx := atmosphere.New(context.Background(), configFlags)
+			
 			// Create workflow
 			tf := flow.NewTaskFlow("deploy")
 			executor := flow.NewExecutor(10)
 
 			// Create component tasks
 			metricsServer := components.NewMetricsServer()
-			_ = metricsServer.GetTask(tf, configFlags)
+			_ = metricsServer.GetTask(ctx, tf)
 
 			// Example: Add more components with dependencies
 			// certManager := components.NewCertManager()
-			// certManagerTask := certManager.GetTask(tf, configFlags)
+			// certManagerTask := certManager.GetTask(ctx, tf)
 			
 			// monitoring := components.NewMonitoring()
-			// monitoringTask := monitoring.GetTask(tf, configFlags)
+			// monitoringTask := monitoring.GetTask(ctx, tf)
 			// monitoringTask.Succeed(metricsServerTask) // Monitoring depends on metrics-server
 			
 			// ingress := components.NewIngress()
-			// ingressTask := ingress.GetTask(tf, configFlags)
+			// ingressTask := ingress.GetTask(ctx, tf)
 			// ingressTask.Succeed(certManagerTask) // Ingress depends on cert-manager for TLS
 
 			// Execute the workflow

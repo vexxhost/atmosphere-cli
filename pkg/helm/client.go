@@ -60,14 +60,14 @@ func (c *Client) loadChart(chartName string, chartPathOptions action.ChartPathOp
 }
 
 // configureInstallAction creates and configures an install action
-func (c *Client) configureInstallAction(chartConfig *ChartConfig, releaseConfig *ReleaseConfig) *action.Install {
+func (c *Client) configureInstallAction(config *ComponentConfig) *action.Install {
 	install := action.NewInstall(c.actionConfig)
 
-	install.RepoURL = chartConfig.RepoURL
-	install.ReleaseName = releaseConfig.Name
-	install.Version = chartConfig.Version
+	install.RepoURL = config.Chart.RepoURL
+	install.ReleaseName = config.Release.Name
+	install.Version = config.Chart.Version
 
-	install.Namespace = releaseConfig.Namespace
+	install.Namespace = config.Release.Namespace
 	install.CreateNamespace = true
 
 	install.Wait = true
@@ -77,14 +77,14 @@ func (c *Client) configureInstallAction(chartConfig *ChartConfig, releaseConfig 
 }
 
 // configureUpgradeAction creates and configures an upgrade action
-func (c *Client) configureUpgradeAction(chartConfig *ChartConfig, releaseConfig *ReleaseConfig, dryRun bool) *action.Upgrade {
+func (c *Client) configureUpgradeAction(config *ComponentConfig, dryRun bool) *action.Upgrade {
 	upgrade := action.NewUpgrade(c.actionConfig)
 
 	upgrade.Install = true
-	upgrade.RepoURL = chartConfig.RepoURL
-	upgrade.Version = chartConfig.Version
+	upgrade.RepoURL = config.Chart.RepoURL
+	upgrade.Version = config.Chart.Version
 
-	upgrade.Namespace = releaseConfig.Namespace
+	upgrade.Namespace = config.Release.Namespace
 	upgrade.ResetValues = true
 	upgrade.Wait = true
 	upgrade.Timeout = 5 * time.Minute
@@ -121,39 +121,39 @@ func (c *Client) GetRelease(releaseName string) (*release.Release, error) {
 }
 
 // InstallRelease installs a Helm chart as a new release
-func (c *Client) InstallRelease(chartConfig *ChartConfig, releaseConfig *ReleaseConfig) (*release.Release, error) {
-	install := c.configureInstallAction(chartConfig, releaseConfig)
+func (c *Client) InstallRelease(config *ComponentConfig) (*release.Release, error) {
+	install := c.configureInstallAction(config)
 
-	ch, err := c.loadChart(chartConfig.Name, install.ChartPathOptions)
+	ch, err := c.loadChart(config.Chart.Name, install.ChartPathOptions)
 	if err != nil {
 		return nil, err
 	}
 
-	return install.Run(ch, releaseConfig.Values)
+	return install.Run(ch, config.Release.Values)
 }
 
 // UpgradeRelease upgrades an existing Helm release
-func (c *Client) UpgradeRelease(chartConfig *ChartConfig, releaseConfig *ReleaseConfig) (*release.Release, error) {
-	upgrade := c.configureUpgradeAction(chartConfig, releaseConfig, false)
+func (c *Client) UpgradeRelease(config *ComponentConfig) (*release.Release, error) {
+	upgrade := c.configureUpgradeAction(config, false)
 
-	ch, err := c.loadChart(chartConfig.Name, upgrade.ChartPathOptions)
+	ch, err := c.loadChart(config.Chart.Name, upgrade.ChartPathOptions)
 	if err != nil {
 		return nil, err
 	}
 
-	return upgrade.Run(releaseConfig.Name, ch, releaseConfig.Values)
+	return upgrade.Run(config.Release.Name, ch, config.Release.Values)
 }
 
 // GetTemplatedManifests renders chart templates with the provided values using a dry-run
-func (c *Client) GetTemplatedManifests(chartConfig *ChartConfig, releaseConfig *ReleaseConfig) (string, error) {
-	upgrade := c.configureUpgradeAction(chartConfig, releaseConfig, true)
+func (c *Client) GetTemplatedManifests(config *ComponentConfig) (string, error) {
+	upgrade := c.configureUpgradeAction(config, true)
 
-	ch, err := c.loadChart(chartConfig.Name, upgrade.ChartPathOptions)
+	ch, err := c.loadChart(config.Chart.Name, upgrade.ChartPathOptions)
 	if err != nil {
 		return "", err
 	}
 
-	rel, err := upgrade.Run(releaseConfig.Name, ch, releaseConfig.Values)
+	rel, err := upgrade.Run(config.Release.Name, ch, config.Release.Values)
 	if err != nil {
 		return "", err
 	}
@@ -162,9 +162,9 @@ func (c *Client) GetTemplatedManifests(chartConfig *ChartConfig, releaseConfig *
 }
 
 // HasDiff checks if there are differences between deployed and templated manifests
-func (c *Client) HasDiff(chartConfig *ChartConfig, releaseConfig *ReleaseConfig) (bool, error) {
+func (c *Client) HasDiff(config *ComponentConfig) (bool, error) {
 	// Check if release exists
-	exists, err := c.ReleaseExists(releaseConfig.Name)
+	exists, err := c.ReleaseExists(config.Release.Name)
 	if err != nil {
 		return false, err
 	}
@@ -175,13 +175,13 @@ func (c *Client) HasDiff(chartConfig *ChartConfig, releaseConfig *ReleaseConfig)
 	}
 
 	// Get deployed release
-	deployedRelease, err := c.GetRelease(releaseConfig.Name)
+	deployedRelease, err := c.GetRelease(config.Release.Name)
 	if err != nil {
 		return false, fmt.Errorf("failed to get deployed release: %w", err)
 	}
 
 	// Get templated manifests
-	templatedManifests, err := c.GetTemplatedManifests(chartConfig, releaseConfig)
+	templatedManifests, err := c.GetTemplatedManifests(config)
 	if err != nil {
 		return false, fmt.Errorf("failed to get templated manifests: %w", err)
 	}
@@ -191,28 +191,28 @@ func (c *Client) HasDiff(chartConfig *ChartConfig, releaseConfig *ReleaseConfig)
 }
 
 // DeployRelease installs or upgrades a release based on whether it exists
-func (c *Client) DeployRelease(chartConfig *ChartConfig, releaseConfig *ReleaseConfig) (*release.Release, error) {
-	exists, err := c.ReleaseExists(releaseConfig.Name)
+func (c *Client) DeployRelease(config *ComponentConfig) (*release.Release, error) {
+	exists, err := c.ReleaseExists(config.Release.Name)
 	if err != nil {
 		return nil, err
 	}
 
 	if exists {
 		// Check if there are any changes
-		hasDiff, err := c.HasDiff(chartConfig, releaseConfig)
+		hasDiff, err := c.HasDiff(config)
 		if err != nil {
 			return nil, fmt.Errorf("failed to check for differences: %w", err)
 		}
 
 		// If no differences, skip upgrade
 		if !hasDiff {
-			log.Info("No changes detected, skipping upgrade", "name", releaseConfig.Name)
+			log.Info("No changes detected, skipping upgrade", "name", config.Release.Name)
 			// Get current release
-			return c.GetRelease(releaseConfig.Name)
+			return c.GetRelease(config.Release.Name)
 		}
 
-		return c.UpgradeRelease(chartConfig, releaseConfig)
+		return c.UpgradeRelease(config)
 	}
 
-	return c.InstallRelease(chartConfig, releaseConfig)
+	return c.InstallRelease(config)
 }

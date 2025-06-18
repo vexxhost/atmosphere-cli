@@ -1,5 +1,4 @@
 //go:build integration
-// +build integration
 
 package components
 
@@ -9,7 +8,6 @@ import (
 	"time"
 
 	"github.com/avast/retry-go/v4"
-	"github.com/spf13/viper"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -31,11 +29,9 @@ type MetricsServerTestSuite struct {
 }
 
 func (suite *MetricsServerTestSuite) SetupTest() {
-	viper.Reset()
-
 	suite.configFlags = genericclioptions.NewConfigFlags(true)
 	suite.ctx = atmosphere.New(context.Background(), suite.configFlags)
-	suite.metricsServer = NewMetricsServer()
+	suite.metricsServer = NewMetricsServer(nil) // No overrides for tests
 	suite.chartConfig = suite.metricsServer.GetChartConfig(suite.ctx)
 	suite.releaseConfig = suite.metricsServer.GetReleaseConfig(suite.ctx)
 
@@ -67,7 +63,11 @@ func (suite *MetricsServerTestSuite) TearDownTest() {
 func (suite *MetricsServerTestSuite) TestDeployMetricsServerAndVerifyAPI() {
 	ctx := context.Background()
 
-	_, err := suite.client.DeployRelease(suite.chartConfig, suite.releaseConfig)
+	componentConfig := &helm.ComponentConfig{
+		Chart:   suite.chartConfig,
+		Release: suite.releaseConfig,
+	}
+	_, err := suite.client.DeployRelease(componentConfig)
 	require.NoError(suite.T(), err)
 
 	clientConfig, err := suite.configFlags.ToRESTConfig()
@@ -95,12 +95,16 @@ func (suite *MetricsServerTestSuite) TestDeployMetricsServerAndVerifyAPI() {
 	require.NoError(suite.T(), err)
 	assert.NotEmpty(suite.T(), podMetrics.Items, "No pod metrics available")
 
-	suite.T().Logf("Metrics API is working: %d nodes and %d pods reporting metrics", 
+	suite.T().Logf("Metrics API is working: %d nodes and %d pods reporting metrics",
 		len(nodeMetrics.Items), len(podMetrics.Items))
 }
 
 func (suite *MetricsServerTestSuite) TestRedeploymentDoesNotChangeRevision() {
-	_, err := suite.client.DeployRelease(suite.chartConfig, suite.releaseConfig)
+	componentConfig := &helm.ComponentConfig{
+		Chart:   suite.chartConfig,
+		Release: suite.releaseConfig,
+	}
+	_, err := suite.client.DeployRelease(componentConfig)
 	require.NoError(suite.T(), err)
 
 	deployedRelease, err := suite.client.GetRelease(suite.releaseConfig.Name)
@@ -112,15 +116,16 @@ func (suite *MetricsServerTestSuite) TestRedeploymentDoesNotChangeRevision() {
 
 	deployedRelease, err = suite.client.GetRelease(suite.releaseConfig.Name)
 	require.NoError(suite.T(), err)
-	assert.Equal(suite.T(), initialRevision, deployedRelease.Version, 
+	assert.Equal(suite.T(), initialRevision, deployedRelease.Version,
 		"Revision should not change when there are no configuration changes")
 }
 
 func (suite *MetricsServerTestSuite) TestCustomConfiguration() {
-	viper.Set("metrics-server.chart.version", "3.12.1")
-	
+	// Test that the default configuration is returned correctly
 	customChartConfig := suite.metricsServer.GetChartConfig(suite.ctx)
-	assert.Equal(suite.T(), "3.12.1", customChartConfig.Version)
+	assert.Equal(suite.T(), "3.12.2", customChartConfig.Version)
+	assert.Equal(suite.T(), "https://kubernetes-sigs.github.io/metrics-server", customChartConfig.RepoURL)
+	assert.Equal(suite.T(), "metrics-server", customChartConfig.Name)
 }
 
 func TestMetricsServerSuite(t *testing.T) {

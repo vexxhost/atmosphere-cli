@@ -3,45 +3,51 @@ package components
 import (
 	"context"
 
+	"dario.cat/mergo"
 	"github.com/charmbracelet/log"
 	flow "github.com/noneback/go-taskflow"
 	"github.com/vexxhost/atmosphere/internal/atmosphere"
 	"github.com/vexxhost/atmosphere/pkg/helm"
 )
 
-// Component represents a deployable component in the atmosphere system
 type Component interface {
-	// GetTask returns a task or subflow for deploying this component
 	GetTask(ctx context.Context, tf *flow.TaskFlow) *flow.Task
 }
 
-// HelmReleaseProvider is the interface that helm components must implement
-type HelmReleaseProvider interface {
-	GetChartConfig(ctx context.Context) *helm.ChartConfig
-	GetReleaseConfig(ctx context.Context) *helm.ReleaseConfig
-}
-
-// HelmComponent provides a default GetTask implementation for Helm-based components
 type HelmComponent struct {
-	Name string
+	Name       string
+	BaseConfig *helm.ComponentConfig
+	Overrides  *helm.ComponentConfig
 }
 
-// GetTask returns a standard deployment task for Helm components
-func (h *HelmComponent) GetTask(ctx context.Context, tf *flow.TaskFlow, component HelmReleaseProvider) *flow.Task {
-	return tf.NewTask("deploy-"+h.Name, func() {
-		chartConfig := component.GetChartConfig(ctx)
-		releaseConfig := component.GetReleaseConfig(ctx)
+func (h *HelmComponent) MergedConfig() (*helm.ComponentConfig, error) {
+	config := h.BaseConfig
+	if err := mergo.Merge(config, h.BaseConfig, mergo.WithOverride); err != nil {
+		return nil, err
+	}
 
+	return config, nil
+}
+
+func (h *HelmComponent) GetTask(ctx context.Context, tf *flow.TaskFlow) *flow.Task {
+	componentConfig, err := h.MergedConfig()
+	if err != nil {
+		log.Fatal("Failed to merge component configuration", "name", h.Name, "error",
+			err)
+		return nil
+	}
+
+	return tf.NewTask("deploy-"+h.Name, func() {
 		log.Info("Deploying component", "name", h.Name)
 
 		// Get REST client getter from context
-		configFlags := atmosphere.MustConfigFlags(ctx)
-		client, err := helm.NewClient(configFlags, releaseConfig.Namespace)
+		getter := atmosphere.MustConfigFlags(ctx)
+		client, err := helm.NewClient(getter, componentConfig.Release.Namespace)
 		if err != nil {
 			log.Fatal("Failed to create helm client", "name", h.Name, "error", err)
 		}
 
-		if _, err := client.DeployRelease(chartConfig, releaseConfig); err != nil {
+		if _, err := client.DeployRelease(componentConfig); err != nil {
 			log.Fatal("Failed to deploy component", "name", h.Name, "error", err)
 		}
 

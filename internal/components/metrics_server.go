@@ -23,8 +23,8 @@ func NewMetricsServer() *MetricsServer {
 	}
 }
 
-// GetRelease returns the Helm release configuration for metrics-server
-func (m *MetricsServer) GetRelease(ctx context.Context) *helm.Release {
+// GetChartConfig returns the Helm chart configuration for metrics-server
+func (m *MetricsServer) GetChartConfig(ctx context.Context) *helm.ChartConfig {
 	sectionName := "metrics-server"
 	section := atmosphere.ConfigSection(ctx, sectionName)
 
@@ -38,6 +38,27 @@ func (m *MetricsServer) GetRelease(ctx context.Context) *helm.Release {
 	section.SetDefault("chart.repository", "https://kubernetes-sigs.github.io/metrics-server")
 	section.SetDefault("chart.name", "metrics-server")
 	section.SetDefault("chart.version", "3.12.2")
+
+	// Create helm.ChartConfig from section
+	return &helm.ChartConfig{
+		RepoURL: section.GetString("chart.repository"),
+		Name:    section.GetString("chart.name"),
+		Version: section.GetString("chart.version"),
+	}
+}
+
+// GetReleaseConfig returns the Helm release configuration for metrics-server
+func (m *MetricsServer) GetReleaseConfig(ctx context.Context) *helm.ReleaseConfig {
+	sectionName := "metrics-server"
+	section := atmosphere.ConfigSection(ctx, sectionName)
+
+	// Set defaults if no config section exists
+	if section == nil {
+		viper.Set(sectionName, map[string]interface{}{})
+		section = viper.Sub(sectionName)
+	}
+
+	// Set defaults directly on the section
 	section.SetDefault("release.namespace", "kube-system")
 	section.SetDefault("release.name", "metrics-server")
 	section.SetDefault("release.values", map[string]interface{}{
@@ -46,15 +67,6 @@ func (m *MetricsServer) GetRelease(ctx context.Context) *helm.Release {
 		},
 	})
 
-	configFlags := atmosphere.MustConfigFlags(ctx)
-	
-	// Create helm.ChartConfig from section
-	chartConfig := &helm.ChartConfig{
-		RepoURL: section.GetString("chart.repository"),
-		Name:    section.GetString("chart.name"),
-		Version: section.GetString("chart.version"),
-	}
-	
 	// Create helm.ReleaseConfig from section
 	allSettings := section.AllSettings()
 	var values map[string]interface{}
@@ -65,16 +77,10 @@ func (m *MetricsServer) GetRelease(ctx context.Context) *helm.Release {
 		}
 	}
 	
-	releaseConfig := &helm.ReleaseConfig{
+	return &helm.ReleaseConfig{
 		Namespace: section.GetString("release.namespace"),
 		Name:      section.GetString("release.name"),
 		Values:    values,
-	}
-	
-	return &helm.Release{
-		RESTClientGetter: configFlags,
-		ChartConfig:      chartConfig,
-		ReleaseConfig:    releaseConfig,
 	}
 }
 

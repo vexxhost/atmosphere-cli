@@ -25,7 +25,9 @@ type MetricsServerTestSuite struct {
 	configFlags   *genericclioptions.ConfigFlags
 	ctx           context.Context
 	metricsServer *MetricsServer
-	release       *helm.Release
+	client        *helm.Client
+	chartConfig   *helm.ChartConfig
+	releaseConfig *helm.ReleaseConfig
 }
 
 func (suite *MetricsServerTestSuite) SetupTest() {
@@ -34,15 +36,21 @@ func (suite *MetricsServerTestSuite) SetupTest() {
 	suite.configFlags = genericclioptions.NewConfigFlags(true)
 	suite.ctx = atmosphere.New(context.Background(), suite.configFlags)
 	suite.metricsServer = NewMetricsServer()
-	suite.release = suite.metricsServer.GetRelease(suite.ctx)
+	suite.chartConfig = suite.metricsServer.GetChartConfig(suite.ctx)
+	suite.releaseConfig = suite.metricsServer.GetReleaseConfig(suite.ctx)
+
+	// Create client
+	var err error
+	suite.client, err = helm.NewClient(suite.configFlags, suite.releaseConfig.Namespace)
+	require.NoError(suite.T(), err)
 
 	// Ensure clean state
-	exists, err := suite.release.Exists()
+	exists, err := suite.client.ReleaseExists(suite.releaseConfig.Name)
 	require.NoError(suite.T(), err)
 
 	if exists {
 		suite.T().Log("Found existing metrics-server, uninstalling for clean test...")
-		err = suite.release.Uninstall()
+		err = suite.client.UninstallRelease(suite.releaseConfig.Name)
 		require.NoError(suite.T(), err)
 		time.Sleep(10 * time.Second)
 	}
@@ -50,7 +58,7 @@ func (suite *MetricsServerTestSuite) SetupTest() {
 
 func (suite *MetricsServerTestSuite) TearDownTest() {
 	suite.T().Log("Cleaning up metrics-server installation...")
-	err := suite.release.Uninstall()
+	err := suite.client.UninstallRelease(suite.releaseConfig.Name)
 	if err != nil {
 		suite.T().Logf("Failed to uninstall metrics-server during cleanup: %v", err)
 	}
@@ -59,7 +67,7 @@ func (suite *MetricsServerTestSuite) TearDownTest() {
 func (suite *MetricsServerTestSuite) TestDeployMetricsServerAndVerifyAPI() {
 	ctx := context.Background()
 
-	err := suite.release.Deploy()
+	_, err := suite.client.DeployRelease(suite.chartConfig, suite.releaseConfig)
 	require.NoError(suite.T(), err)
 
 	clientConfig, err := suite.configFlags.ToRESTConfig()
@@ -92,17 +100,17 @@ func (suite *MetricsServerTestSuite) TestDeployMetricsServerAndVerifyAPI() {
 }
 
 func (suite *MetricsServerTestSuite) TestRedeploymentDoesNotChangeRevision() {
-	err := suite.release.Deploy()
+	_, err := suite.client.DeployRelease(suite.chartConfig, suite.releaseConfig)
 	require.NoError(suite.T(), err)
 
-	deployedRelease, err := suite.release.GetDeployedRelease()
+	deployedRelease, err := suite.client.GetRelease(suite.releaseConfig.Name)
 	require.NoError(suite.T(), err)
 	initialRevision := deployedRelease.Version
 
-	err = suite.release.Deploy()
+	_, err = suite.client.DeployRelease(suite.chartConfig, suite.releaseConfig)
 	require.NoError(suite.T(), err)
 
-	deployedRelease, err = suite.release.GetDeployedRelease()
+	deployedRelease, err = suite.client.GetRelease(suite.releaseConfig.Name)
 	require.NoError(suite.T(), err)
 	assert.Equal(suite.T(), initialRevision, deployedRelease.Version, 
 		"Revision should not change when there are no configuration changes")
@@ -111,8 +119,8 @@ func (suite *MetricsServerTestSuite) TestRedeploymentDoesNotChangeRevision() {
 func (suite *MetricsServerTestSuite) TestCustomConfiguration() {
 	viper.Set("metrics-server.chart.version", "3.12.1")
 	
-	customRelease := suite.metricsServer.GetRelease(suite.ctx)
-	assert.Equal(suite.T(), "3.12.1", customRelease.ChartConfig.Version)
+	customChartConfig := suite.metricsServer.GetChartConfig(suite.ctx)
+	assert.Equal(suite.T(), "3.12.1", customChartConfig.Version)
 }
 
 func TestMetricsServerSuite(t *testing.T) {

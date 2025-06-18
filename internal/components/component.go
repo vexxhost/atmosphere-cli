@@ -5,6 +5,7 @@ import (
 
 	"github.com/charmbracelet/log"
 	flow "github.com/noneback/go-taskflow"
+	"github.com/vexxhost/atmosphere/internal/atmosphere"
 	"github.com/vexxhost/atmosphere/pkg/helm"
 )
 
@@ -16,7 +17,8 @@ type Component interface {
 
 // HelmReleaseProvider is the interface that helm components must implement
 type HelmReleaseProvider interface {
-	GetRelease(ctx context.Context) *helm.Release
+	GetChartConfig(ctx context.Context) *helm.ChartConfig
+	GetReleaseConfig(ctx context.Context) *helm.ReleaseConfig
 }
 
 // HelmComponent provides a default GetTask implementation for Helm-based components
@@ -27,11 +29,19 @@ type HelmComponent struct {
 // GetTask returns a standard deployment task for Helm components
 func (h *HelmComponent) GetTask(ctx context.Context, tf *flow.TaskFlow, component HelmReleaseProvider) *flow.Task {
 	return tf.NewTask("deploy-"+h.Name, func() {
-		release := component.GetRelease(ctx)
+		chartConfig := component.GetChartConfig(ctx)
+		releaseConfig := component.GetReleaseConfig(ctx)
 
 		log.Info("Deploying component", "name", h.Name)
 
-		if err := release.Deploy(); err != nil {
+		// Get REST client getter from context
+		configFlags := atmosphere.MustConfigFlags(ctx)
+		client, err := helm.NewClient(configFlags, releaseConfig.Namespace)
+		if err != nil {
+			log.Fatal("Failed to create helm client", "name", h.Name, "error", err)
+		}
+
+		if _, err := client.DeployRelease(chartConfig, releaseConfig); err != nil {
 			log.Fatal("Failed to deploy component", "name", h.Name, "error", err)
 		}
 

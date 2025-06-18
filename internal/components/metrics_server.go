@@ -6,8 +6,7 @@ import (
 	flow "github.com/noneback/go-taskflow"
 	"github.com/spf13/viper"
 	"github.com/vexxhost/atmosphere/internal/atmosphere"
-	"github.com/vexxhost/atmosphere/internal/config"
-	"github.com/vexxhost/atmosphere/internal/helm"
+	"github.com/vexxhost/atmosphere/pkg/helm"
 )
 
 // MetricsServer represents the metrics-server component
@@ -35,28 +34,47 @@ func (m *MetricsServer) GetRelease(ctx context.Context) *helm.Release {
 		section = viper.Sub(sectionName)
 	}
 
-	helm.SetReleaseDefault(section, &helm.Release{
-		ChartConfig: &config.ChartConfig{
-			RepoURL: "https://kubernetes-sigs.github.io/metrics-server",
-			Name:    "metrics-server",
-			Version: "3.12.2",
-		},
-		ReleaseConfig: &config.ReleaseConfig{
-			Namespace: "kube-system",
-			Name:      "metrics-server",
-			Values: map[string]interface{}{
-				"args": []string{
-					"--kubelet-insecure-tls",
-				},
-			},
+	// Set defaults directly on the section
+	section.SetDefault("chart.repository", "https://kubernetes-sigs.github.io/metrics-server")
+	section.SetDefault("chart.name", "metrics-server")
+	section.SetDefault("chart.version", "3.12.2")
+	section.SetDefault("release.namespace", "kube-system")
+	section.SetDefault("release.name", "metrics-server")
+	section.SetDefault("release.values", map[string]interface{}{
+		"args": []string{
+			"--kubelet-insecure-tls",
 		},
 	})
 
 	configFlags := atmosphere.MustConfigFlags(ctx)
+	
+	// Create helm.ChartConfig from section
+	chartConfig := &helm.ChartConfig{
+		RepoURL: section.GetString("chart.repository"),
+		Name:    section.GetString("chart.name"),
+		Version: section.GetString("chart.version"),
+	}
+	
+	// Create helm.ReleaseConfig from section
+	allSettings := section.AllSettings()
+	var values map[string]interface{}
+	
+	if release, ok := allSettings["release"].(map[string]interface{}); ok {
+		if releaseValues, ok := release["values"].(map[string]interface{}); ok {
+			values = releaseValues
+		}
+	}
+	
+	releaseConfig := &helm.ReleaseConfig{
+		Namespace: section.GetString("release.namespace"),
+		Name:      section.GetString("release.name"),
+		Values:    values,
+	}
+	
 	return &helm.Release{
 		RESTClientGetter: configFlags,
-		ChartConfig:      config.ChartConfigFromConfigSection(section),
-		ReleaseConfig:    config.ReleaseConfigFromConfigSection(section),
+		ChartConfig:      chartConfig,
+		ReleaseConfig:    releaseConfig,
 	}
 }
 

@@ -7,8 +7,6 @@ import (
 	"time"
 
 	"github.com/charmbracelet/log"
-	"github.com/spf13/viper"
-	"github.com/vexxhost/atmosphere/internal/config"
 	"helm.sh/helm/v3/pkg/action"
 	"helm.sh/helm/v3/pkg/chart"
 	"helm.sh/helm/v3/pkg/chart/loader"
@@ -18,20 +16,35 @@ import (
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 )
 
-func SetReleaseDefault(section *viper.Viper, defaults *Release) {
-	section.SetDefault("chart.repository", defaults.ChartConfig.RepoURL)
-	section.SetDefault("chart.name", defaults.ChartConfig.Name)
-	section.SetDefault("chart.version", defaults.ChartConfig.Version)
-	section.SetDefault("release.namespace", defaults.ReleaseConfig.Namespace)
-	section.SetDefault("release.name", defaults.ReleaseConfig.Name)
-	section.SetDefault("release.values", defaults.ReleaseConfig.Values)
+// ChartConfig contains the configuration for a Helm chart
+type ChartConfig struct {
+	// RepoURL points to the Helm chart repository URL.
+	RepoURL string
+
+	// Name is the name of the Helm chart.
+	Name string
+
+	// Version is the version of the Helm chart.
+	Version string
+}
+
+// ReleaseConfig contains the configuration for a Helm release
+type ReleaseConfig struct {
+	// Namespace is the Kubernetes namespace where the Helm release will be deployed.
+	Namespace string
+
+	// Name is the name of the Helm release.
+	Name string
+
+	// Values are the Helm values to be used for the release.
+	Values map[string]interface{}
 }
 
 // Release represents a Helm release manager that handles install/upgrade operations
 type Release struct {
 	RESTClientGetter genericclioptions.RESTClientGetter
-	ChartConfig      *config.ChartConfig
-	ReleaseConfig    *config.ReleaseConfig
+	ChartConfig      *ChartConfig
+	ReleaseConfig    *ReleaseConfig
 	Revision         int
 }
 

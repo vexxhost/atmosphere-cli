@@ -5,7 +5,7 @@ import (
 
 	"github.com/charmbracelet/log"
 	flow "github.com/noneback/go-taskflow"
-	"github.com/vexxhost/atmosphere/internal/helm"
+	"github.com/vexxhost/atmosphere/pkg/helm"
 )
 
 // Component represents a deployable component in the atmosphere system

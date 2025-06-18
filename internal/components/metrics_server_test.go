@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/vexxhost/atmosphere/internal/atmosphere"
-	"github.com/vexxhost/atmosphere/internal/helm"
+	"github.com/vexxhost/atmosphere/pkg/helm"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	metricsclientset "k8s.io/metrics/pkg/client/clientset/versioned"

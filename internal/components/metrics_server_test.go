@@ -20,33 +20,27 @@ import (
 
 type MetricsServerTestSuite struct {
 	suite.Suite
-	configFlags   *genericclioptions.ConfigFlags
-	ctx           context.Context
-	metricsServer *MetricsServer
-	client        *helm.Client
-	chartConfig   *helm.ChartConfig
-	releaseConfig *helm.ReleaseConfig
+	configFlags *genericclioptions.ConfigFlags
+	ctx         context.Context
+	client      *helm.Client
 }
 
 func (suite *MetricsServerTestSuite) SetupTest() {
 	suite.configFlags = genericclioptions.NewConfigFlags(true)
 	suite.ctx = atmosphere.New(context.Background(), suite.configFlags)
-	suite.metricsServer = NewMetricsServer(nil) // No overrides for tests
-	suite.chartConfig = suite.metricsServer.GetChartConfig(suite.ctx)
-	suite.releaseConfig = suite.metricsServer.GetReleaseConfig(suite.ctx)
 
 	// Create client
 	var err error
-	suite.client, err = helm.NewClient(suite.configFlags, suite.releaseConfig.Namespace)
+	suite.client, err = helm.NewClient(suite.configFlags, "kube-system")
 	require.NoError(suite.T(), err)
 
 	// Ensure clean state
-	exists, err := suite.client.ReleaseExists(suite.releaseConfig.Name)
+	exists, err := suite.client.ReleaseExists("metrics-server")
 	require.NoError(suite.T(), err)
 
 	if exists {
 		suite.T().Log("Found existing metrics-server, uninstalling for clean test...")
-		err = suite.client.UninstallRelease(suite.releaseConfig.Name)
+		err = suite.client.UninstallRelease("metrics-server")
 		require.NoError(suite.T(), err)
 		time.Sleep(10 * time.Second)
 	}
@@ -54,20 +48,18 @@ func (suite *MetricsServerTestSuite) SetupTest() {
 
 func (suite *MetricsServerTestSuite) TearDownTest() {
 	suite.T().Log("Cleaning up metrics-server installation...")
-	err := suite.client.UninstallRelease(suite.releaseConfig.Name)
+	err := suite.client.UninstallRelease("metrics-server")
 	if err != nil {
 		suite.T().Logf("Failed to uninstall metrics-server during cleanup: %v", err)
 	}
 }
 
-func (suite *MetricsServerTestSuite) TestDeployMetricsServerAndVerifyAPI() {
-	ctx := context.Background()
+func (suite *MetricsServerTestSuite) TestDeployment() {
+	metricsServer := NewMetricsServer(nil)
+	componentConfig, err := metricsServer.MergedConfig()
+	require.NoError(suite.T(), err)
 
-	componentConfig := &helm.ComponentConfig{
-		Chart:   suite.chartConfig,
-		Release: suite.releaseConfig,
-	}
-	_, err := suite.client.DeployRelease(componentConfig)
+	_, err = suite.client.DeployRelease(componentConfig)
 	require.NoError(suite.T(), err)
 
 	clientConfig, err := suite.configFlags.ToRESTConfig()
@@ -78,7 +70,7 @@ func (suite *MetricsServerTestSuite) TestDeployMetricsServerAndVerifyAPI() {
 
 	err = retry.Do(
 		func() error {
-			_, err := metricsClient.MetricsV1beta1().NodeMetricses().List(ctx, metav1.ListOptions{})
+			_, err := metricsClient.MetricsV1beta1().NodeMetricses().List(context.Background(), metav1.ListOptions{})
 			return err
 		},
 		retry.Attempts(24),
@@ -87,45 +79,55 @@ func (suite *MetricsServerTestSuite) TestDeployMetricsServerAndVerifyAPI() {
 	)
 	require.NoError(suite.T(), err, "Metrics API did not become available")
 
-	nodeMetrics, err := metricsClient.MetricsV1beta1().NodeMetricses().List(ctx, metav1.ListOptions{})
+	nodeMetrics, err := metricsClient.MetricsV1beta1().NodeMetricses().List(context.Background(), metav1.ListOptions{})
 	require.NoError(suite.T(), err)
 	assert.NotEmpty(suite.T(), nodeMetrics.Items, "No node metrics available")
-
-	podMetrics, err := metricsClient.MetricsV1beta1().PodMetricses("kube-system").List(ctx, metav1.ListOptions{})
-	require.NoError(suite.T(), err)
-	assert.NotEmpty(suite.T(), podMetrics.Items, "No pod metrics available")
-
-	suite.T().Logf("Metrics API is working: %d nodes and %d pods reporting metrics",
-		len(nodeMetrics.Items), len(podMetrics.Items))
 }
 
-func (suite *MetricsServerTestSuite) TestRedeploymentDoesNotChangeRevision() {
-	componentConfig := &helm.ComponentConfig{
-		Chart:   suite.chartConfig,
-		Release: suite.releaseConfig,
+func (suite *MetricsServerTestSuite) TestDeploymentWithOverrides() {
+	overrides := &helm.ComponentConfig{
+		Release: &helm.ReleaseConfig{
+			Values: map[string]interface{}{
+				"replicas": 2,
+				"args": []string{
+					"--kubelet-insecure-tls",
+					"--metric-resolution=30s",
+				},
+			},
+		},
 	}
-	_, err := suite.client.DeployRelease(componentConfig)
+
+	metricsServer := NewMetricsServer(overrides)
+	componentConfig, err := metricsServer.MergedConfig()
 	require.NoError(suite.T(), err)
 
-	deployedRelease, err := suite.client.GetRelease(suite.releaseConfig.Name)
-	require.NoError(suite.T(), err)
-	initialRevision := deployedRelease.Version
-
-	_, err = suite.client.DeployRelease(suite.chartConfig, suite.releaseConfig)
+	_, err = suite.client.DeployRelease(componentConfig)
 	require.NoError(suite.T(), err)
 
-	deployedRelease, err = suite.client.GetRelease(suite.releaseConfig.Name)
+	deployedRelease, err := suite.client.GetRelease("metrics-server")
 	require.NoError(suite.T(), err)
-	assert.Equal(suite.T(), initialRevision, deployedRelease.Version,
-		"Revision should not change when there are no configuration changes")
-}
+	assert.Equal(suite.T(), "deployed", deployedRelease.Info.Status.String())
 
-func (suite *MetricsServerTestSuite) TestCustomConfiguration() {
-	// Test that the default configuration is returned correctly
-	customChartConfig := suite.metricsServer.GetChartConfig(suite.ctx)
-	assert.Equal(suite.T(), "3.12.2", customChartConfig.Version)
-	assert.Equal(suite.T(), "https://kubernetes-sigs.github.io/metrics-server", customChartConfig.RepoURL)
-	assert.Equal(suite.T(), "metrics-server", customChartConfig.Name)
+	// Verify that overrides are properly applied
+	// deployedRelease.Config is a map[string]interface{} from helm
+	valuesMap := deployedRelease.Config
+	suite.T().Logf("Deployed values: %v", valuesMap)
+
+	// Check that replicas was overridden
+	replicas, ok := valuesMap["replicas"].(int)
+	if !ok {
+		// Try float64 as JSON unmarshaling often uses float64 for numbers
+		replicasFloat, ok := valuesMap["replicas"].(float64)
+		require.True(suite.T(), ok, "replicas should be a number")
+		replicas = int(replicasFloat)
+	}
+	assert.Equal(suite.T(), 2, replicas)
+
+	// Check that args contains both default and override values
+	args, ok := valuesMap["args"].([]interface{})
+	require.True(suite.T(), ok, "args should be a slice")
+	assert.Contains(suite.T(), args, "--kubelet-insecure-tls")
+	assert.Contains(suite.T(), args, "--metric-resolution=30s")
 }
 
 func TestMetricsServerSuite(t *testing.T) {

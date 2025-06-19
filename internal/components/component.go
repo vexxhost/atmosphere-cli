@@ -21,9 +21,15 @@ type HelmComponent struct {
 }
 
 func (h *HelmComponent) MergedConfig() (*helm.ComponentConfig, error) {
-	config := h.BaseConfig
-	if err := mergo.Merge(config, h.BaseConfig, mergo.WithOverride); err != nil {
+	config := &helm.ComponentConfig{}
+	if err := mergo.Merge(config, h.BaseConfig); err != nil {
 		return nil, err
+	}
+
+	if h.Overrides != nil {
+		if err := mergo.Merge(config, h.Overrides, mergo.WithOverride); err != nil {
+			return nil, err
+		}
 	}
 
 	return config, nil

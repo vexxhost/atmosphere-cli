@@ -14,44 +14,19 @@ import (
 	"github.com/vexxhost/atmosphere/internal/atmosphere"
 	"github.com/vexxhost/atmosphere/pkg/helm"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/cli-runtime/pkg/genericclioptions"
 	metricsclientset "k8s.io/metrics/pkg/client/clientset/versioned"
 )
 
 type MetricsServerTestSuite struct {
-	suite.Suite
-	configFlags *genericclioptions.ConfigFlags
-	ctx         context.Context
-	client      *helm.Client
+	helm.HelmTestSuite
 }
 
-func (suite *MetricsServerTestSuite) SetupTest() {
-	suite.configFlags = genericclioptions.NewConfigFlags(true)
-	suite.ctx = atmosphere.New(context.Background(), suite.configFlags)
-
-	// Create client
-	var err error
-	suite.client, err = helm.NewClient(suite.configFlags, "kube-system")
-	require.NoError(suite.T(), err)
-
-	// Ensure clean state
-	exists, err := suite.client.ReleaseExists("metrics-server")
-	require.NoError(suite.T(), err)
-
-	if exists {
-		suite.T().Log("Found existing metrics-server, uninstalling for clean test...")
-		err = suite.client.UninstallRelease("metrics-server")
-		require.NoError(suite.T(), err)
-		time.Sleep(10 * time.Second)
-	}
-}
-
-func (suite *MetricsServerTestSuite) TearDownTest() {
-	suite.T().Log("Cleaning up metrics-server installation...")
-	err := suite.client.UninstallRelease("metrics-server")
-	if err != nil {
-		suite.T().Logf("Failed to uninstall metrics-server during cleanup: %v", err)
-	}
+// SetupSuite initializes common test infrastructure
+func (suite *MetricsServerTestSuite) SetupSuite() {
+	// Call parent setup
+	suite.HelmTestSuite.SetupSuite()
+	// Override context with atmosphere context
+	suite.Ctx = atmosphere.New(suite.Ctx, suite.ConfigFlags)
 }
 
 func (suite *MetricsServerTestSuite) TestDeployment() {
@@ -59,10 +34,18 @@ func (suite *MetricsServerTestSuite) TestDeployment() {
 	componentConfig, err := metricsServer.MergedConfig()
 	require.NoError(suite.T(), err)
 
-	_, err = suite.client.DeployRelease(componentConfig)
+	// Create client
+	client, err := suite.CreateClient(componentConfig.Release.Namespace)
 	require.NoError(suite.T(), err)
 
-	clientConfig, err := suite.configFlags.ToRESTConfig()
+	// Prepare release (ensures clean state and tracks for cleanup)
+	suite.PrepareRelease(client, componentConfig.Release)
+
+	// Deploy the release
+	_, err = client.DeployRelease(componentConfig)
+	require.NoError(suite.T(), err)
+
+	clientConfig, err := suite.ConfigFlags.ToRESTConfig()
 	require.NoError(suite.T(), err)
 
 	metricsClient, err := metricsclientset.NewForConfig(clientConfig)
@@ -101,10 +84,19 @@ func (suite *MetricsServerTestSuite) TestDeploymentWithOverrides() {
 	componentConfig, err := metricsServer.MergedConfig()
 	require.NoError(suite.T(), err)
 
-	_, err = suite.client.DeployRelease(componentConfig)
+	// Create client
+	client, err := suite.CreateClient(componentConfig.Release.Namespace)
 	require.NoError(suite.T(), err)
 
-	deployedRelease, err := suite.client.GetRelease("metrics-server")
+	// Prepare release (ensures clean state and tracks for cleanup)
+	suite.PrepareRelease(client, componentConfig.Release)
+
+	// Deploy the release
+	_, err = client.DeployRelease(componentConfig)
+	require.NoError(suite.T(), err)
+
+	// Get deployed release info
+	deployedRelease, err := client.GetRelease(componentConfig.Release.Name)
 	require.NoError(suite.T(), err)
 	assert.Equal(suite.T(), "deployed", deployedRelease.Info.Status.String())
 

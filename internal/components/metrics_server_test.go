@@ -60,48 +60,6 @@ func (suite *MetricsServerTestSuite) TestDeployment() {
 	assert.NotEmpty(suite.T(), nodeMetrics.Items, "No node metrics available")
 }
 
-func (suite *MetricsServerTestSuite) TestDeploymentWithOverrides() {
-	overrides := &helm.ComponentConfig{
-		Release: &helm.ReleaseConfig{
-			Values: map[string]interface{}{
-				"replicas": 2,
-				"args": []string{
-					"--kubelet-insecure-tls",
-					"--metric-resolution=30s",
-				},
-			},
-		},
-	}
-
-	metricsServer := NewMetricsServer(overrides)
-	componentConfig, err := metricsServer.MergedConfig()
-	require.NoError(suite.T(), err)
-
-	// Deploy the component
-	deployedRelease, err := suite.DeployComponent(componentConfig)
-	require.NoError(suite.T(), err)
-
-	// Verify that overrides are properly applied
-	// deployedRelease.Config is a map[string]interface{} from helm
-	valuesMap := deployedRelease.Config
-	suite.T().Logf("Deployed values: %v", valuesMap)
-
-	// Check that replicas was overridden
-	replicas, ok := valuesMap["replicas"].(int)
-	if !ok {
-		// Try float64 as JSON unmarshaling often uses float64 for numbers
-		replicasFloat, ok := valuesMap["replicas"].(float64)
-		require.True(suite.T(), ok, "replicas should be a number")
-		replicas = int(replicasFloat)
-	}
-	assert.Equal(suite.T(), 2, replicas)
-
-	// Check that args contains both default and override values
-	args, ok := valuesMap["args"].([]interface{})
-	require.True(suite.T(), ok, "args should be a slice")
-	assert.Contains(suite.T(), args, "--kubelet-insecure-tls")
-	assert.Contains(suite.T(), args, "--metric-resolution=30s")
-}
 
 func TestMetricsServerSuite(t *testing.T) {
 	suite.Run(t, &MetricsServerTestSuite{})

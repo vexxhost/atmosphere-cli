@@ -33,12 +33,24 @@ This command handles the deployment of services, configurations, and resources.`
 			tf := flow.NewTaskFlow("deploy")
 			executor := flow.NewExecutor(10)
 
-			// Get overrides for metrics-server
+			// Get overrides
 			metricsServerOverrides, _ := config.GetHelmComponent("metrics-server")
+
+			vaultOperatorOverrides, _ := config.GetHelmComponent("vault-operator")
+			vaultOperatorCRDsOverrides, _ := config.GetManifestComponent("vault-operator-crds")
+			vaultOperatorRBACOverrides, _ := config.GetManifestComponent("vault-operator-rbac")
 
 			// Create component tasks
 			metricsServer := components.NewMetricsServer(metricsServerOverrides)
 			_ = metricsServer.GetTask(ctx, tf)
+
+			vaultOperatorCRDs := components.NewVaultOperatorCRDs(vaultOperatorCRDsOverrides)
+			vaultOperatorCRDsTask := vaultOperatorCRDs.GetTask(ctx, tf)
+			vaultOperatorRBAC := components.NewVaultOperatorRBAC(vaultOperatorRBACOverrides)
+			vaultOperatorRBACTask := vaultOperatorRBAC.GetTask(ctx, tf)
+			vaultOperator := components.NewVaultOperator(vaultOperatorOverrides)
+			vaultOperatorTask := vaultOperator.GetTask(ctx, tf)
+			vaultOperatorTask.Succeed(vaultOperatorCRDsTask, vaultOperatorRBACTask) // Vault operator depends on CRDs and RBAC
 
 			// Example: Add more components with dependencies
 			// certManager := components.NewCertManager()

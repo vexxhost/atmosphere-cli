@@ -13,6 +13,7 @@ import (
 	"github.com/knadh/koanf/providers/file"
 	"github.com/knadh/koanf/v2"
 	"github.com/vexxhost/atmosphere/pkg/helm"
+	"github.com/vexxhost/atmosphere/pkg/manifests"
 )
 
 var k = koanf.New(".")
@@ -59,6 +60,21 @@ func GetHelmComponent(name string) (*helm.ComponentConfig, error) {
 
 	if err := k.Unmarshal(name, override); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal component %q: %w", name, err)
+	}
+
+	return override, nil
+}
+
+// GetManifestComponent retrieves configuration for a manifest component by name
+func GetManifestComponent(name string) (*manifests.ManifestConfig, error) {
+	override := &manifests.ManifestConfig{}
+
+	if !k.Exists(name) {
+		return override, nil
+	}
+
+	if err := k.Unmarshal(name, override); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal manifest component %q: %w", name, err)
 	}
 
 	return override, nil

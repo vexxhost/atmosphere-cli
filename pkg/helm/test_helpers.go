@@ -9,6 +9,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"helm.sh/helm/v3/pkg/release"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 )
 
@@ -75,7 +76,7 @@ func (s *HelmTestSuite) TearDownSuite() {
 // PrepareRelease prepares a release for testing by ensuring clean state and tracking for cleanup
 func (s *HelmTestSuite) PrepareRelease(client *Client, releaseConfig *ReleaseConfig) {
 	s.Tracker.Track(client, releaseConfig)
-	
+
 	// Ensure clean state
 	exists, err := client.ReleaseExists(releaseConfig.Name)
 	require.NoError(s.T(), err)
@@ -91,4 +92,42 @@ func (s *HelmTestSuite) PrepareRelease(client *Client, releaseConfig *ReleaseCon
 // CreateClient creates a new Helm client for the given namespace
 func (s *HelmTestSuite) CreateClient(namespace string) (*Client, error) {
 	return NewClient(s.ConfigFlags, namespace)
+}
+
+func (s *HelmTestSuite) DeployComponent(componentConfig *ComponentConfig) (*release.Release, error) {
+	// Create client
+	client, err := s.CreateClient(componentConfig.Release.Namespace)
+	if err != nil {
+		return nil, err
+	}
+
+	// Prepare release (ensures clean state and tracks for cleanup)
+	s.PrepareRelease(client, componentConfig.Release)
+
+	// Deploy the release
+	_, err = client.DeployRelease(componentConfig)
+	if err != nil {
+		return nil, err
+	}
+
+	// Verify release exists
+	exists, err := client.ReleaseExists(componentConfig.Release.Name)
+	require.NoError(s.T(), err)
+	require.True(s.T(), exists, "Release %s should exist after deployment", componentConfig.Release.Name)
+
+	// Get deployed release info
+	deployedRelease, err := client.GetRelease(componentConfig.Release.Name)
+	require.NoError(s.T(), err)
+
+	// Verify deployment status and basic info
+	require.Equal(s.T(), "deployed", deployedRelease.Info.Status.String())
+	require.Equal(s.T(), componentConfig.Release.Name, deployedRelease.Name)
+	require.Equal(s.T(), componentConfig.Release.Namespace, deployedRelease.Namespace)
+	require.Equal(s.T(), 1, deployedRelease.Version)
+
+	// Log success
+	s.T().Logf("Successfully deployed %s: %s in namespace %s",
+		componentConfig.Chart.Name, deployedRelease.Name, deployedRelease.Namespace)
+
+	return deployedRelease, nil
 }

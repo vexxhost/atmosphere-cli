@@ -5,7 +5,6 @@ package helm
 import (
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 )
@@ -34,31 +33,9 @@ func (suite *RemoteChartTestSuite) TestDeployFromRemoteRepository() {
 		},
 	}
 
-	// Create client
-	client, err := suite.CreateClient(componentConfig.Release.Namespace)
+	// Deploy the component
+	_, err := suite.DeployComponent(componentConfig)
 	require.NoError(suite.T(), err)
-
-	// Prepare release (ensures clean state and tracks for cleanup)
-	suite.PrepareRelease(client, componentConfig.Release)
-
-	// Deploy the chart
-	_, err = client.DeployRelease(componentConfig)
-	require.NoError(suite.T(), err)
-
-	// Verify release exists
-	exists, err := client.ReleaseExists(componentConfig.Release.Name)
-	require.NoError(suite.T(), err)
-	assert.True(suite.T(), exists, "Release should exist after deployment")
-
-	// Get deployed release info
-	deployedRelease, err := client.GetRelease(componentConfig.Release.Name)
-	require.NoError(suite.T(), err)
-	assert.Equal(suite.T(), "test-nginx-remote", deployedRelease.Name)
-	assert.Equal(suite.T(), "test-helm-remote", deployedRelease.Namespace)
-	assert.Equal(suite.T(), 1, deployedRelease.Version)
-
-	suite.T().Logf("Successfully deployed chart from remote repository: %s in namespace %s",
-		deployedRelease.Name, deployedRelease.Namespace)
 }
 
 func TestRemoteChartSuite(t *testing.T) {

@@ -34,15 +34,8 @@ func (suite *MetricsServerTestSuite) TestDeployment() {
 	componentConfig, err := metricsServer.MergedConfig()
 	require.NoError(suite.T(), err)
 
-	// Create client
-	client, err := suite.CreateClient(componentConfig.Release.Namespace)
-	require.NoError(suite.T(), err)
-
-	// Prepare release (ensures clean state and tracks for cleanup)
-	suite.PrepareRelease(client, componentConfig.Release)
-
-	// Deploy the release
-	_, err = client.DeployRelease(componentConfig)
+	// Deploy the component
+	_, err = suite.DeployComponent(componentConfig)
 	require.NoError(suite.T(), err)
 
 	clientConfig, err := suite.ConfigFlags.ToRESTConfig()
@@ -84,21 +77,9 @@ func (suite *MetricsServerTestSuite) TestDeploymentWithOverrides() {
 	componentConfig, err := metricsServer.MergedConfig()
 	require.NoError(suite.T(), err)
 
-	// Create client
-	client, err := suite.CreateClient(componentConfig.Release.Namespace)
+	// Deploy the component
+	deployedRelease, err := suite.DeployComponent(componentConfig)
 	require.NoError(suite.T(), err)
-
-	// Prepare release (ensures clean state and tracks for cleanup)
-	suite.PrepareRelease(client, componentConfig.Release)
-
-	// Deploy the release
-	_, err = client.DeployRelease(componentConfig)
-	require.NoError(suite.T(), err)
-
-	// Get deployed release info
-	deployedRelease, err := client.GetRelease(componentConfig.Release.Name)
-	require.NoError(suite.T(), err)
-	assert.Equal(suite.T(), "deployed", deployedRelease.Info.Status.String())
 
 	// Verify that overrides are properly applied
 	// deployedRelease.Config is a map[string]interface{} from helm

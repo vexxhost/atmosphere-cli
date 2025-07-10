@@ -12,7 +12,7 @@ require (
 	github.com/knadh/koanf/parsers/toml/v2 v2.2.0
 	github.com/knadh/koanf/parsers/yaml v1.0.0
 	github.com/knadh/koanf/providers/file v1.2.0
-	github.com/knadh/koanf/v2 v2.2.1
+	github.com/knadh/koanf/v2 v2.2.2
 	github.com/noneback/go-taskflow v1.1.0
 	github.com/spf13/cobra v1.9.1
 	github.com/stretchr/testify v1.10.0
@@ -63,7 +63,7 @@ require (
 	github.com/go-openapi/jsonreference v0.21.0 // indirect
 	github.com/go-openapi/swag v0.23.1 // indirect
 	github.com/go-sql-driver/mysql v1.9.2 // indirect
-	github.com/go-viper/mapstructure/v2 v2.2.1 // indirect
+	github.com/go-viper/mapstructure/v2 v2.3.0 // indirect
 	github.com/gobwas/glob v0.2.3 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/google/btree v1.1.3 // indirect

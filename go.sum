@@ -246,6 +246,8 @@ github.com/mxk/go-flowrate v0.0.0-20140419014527-cca7078d478f h1:y5//uYreIhSUg3J
 github.com/mxk/go-flowrate v0.0.0-20140419014527-cca7078d478f/go.mod h1:ZdcZmHo+o7JKHSa8/e818NopupXU1YMK5fe1lsApnBw=
 github.com/noneback/go-taskflow v1.1.0 h1:pBnMyD0r+M43uTczlJ+pRylJoi7d8ScBFfwLFYtx544=
 github.com/noneback/go-taskflow v1.1.0/go.mod h1:OFoGVJHkk+nyRigPXcPnOYHGJ4SzThnx/xAe8fbagxI=
+github.com/noneback/go-taskflow v1.1.3 h1:r+ADjF4Vok7exnPaVqGj7xBxWJUkswCI7PvxdM7/O8c=
+github.com/noneback/go-taskflow v1.1.3/go.mod h1:OFoGVJHkk+nyRigPXcPnOYHGJ4SzThnx/xAe8fbagxI=
 github.com/onsi/ginkgo/v2 v2.23.4 h1:ktYTpKJAVZnDT4VjxSbiBenUjmlL/5QkBEocaWXiQus=
 github.com/onsi/ginkgo/v2 v2.23.4/go.mod h1:Bt66ApGPBFzHyR+JO10Zbt0Gsp4uWxu5mIOTusL46e8=
 github.com/onsi/gomega v1.36.3 h1:hID7cr8t3Wp26+cYnfcjR6HpJ00fdogN6dqZ1t6IylU=

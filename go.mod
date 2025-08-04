@@ -13,7 +13,7 @@ require (
 	github.com/knadh/koanf/parsers/yaml v1.0.0
 	github.com/knadh/koanf/providers/file v1.2.0
 	github.com/knadh/koanf/v2 v2.2.1
-	github.com/noneback/go-taskflow v1.1.0
+	github.com/noneback/go-taskflow v1.1.3
 	github.com/spf13/cobra v1.9.1
 	github.com/stretchr/testify v1.10.0
 	helm.sh/helm/v3 v3.18.3

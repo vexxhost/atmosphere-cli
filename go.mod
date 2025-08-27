@@ -15,7 +15,7 @@ require (
 	github.com/knadh/koanf/v2 v2.2.1
 	github.com/noneback/go-taskflow v1.1.0
 	github.com/spf13/cobra v1.9.1
-	github.com/stretchr/testify v1.10.0
+	github.com/stretchr/testify v1.11.1
 	helm.sh/helm/v3 v3.18.3
 	k8s.io/api v0.33.1
 	k8s.io/apimachinery v0.33.1

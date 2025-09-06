@@ -2,7 +2,7 @@ module github.com/vexxhost/atmosphere
 
 go 1.24.0
 
-toolchain go1.24.4
+toolchain go1.25.1
 
 require (
 	dario.cat/mergo v1.0.2

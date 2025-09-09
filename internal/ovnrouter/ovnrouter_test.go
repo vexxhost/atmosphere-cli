@@ -23,20 +23,6 @@ const (
 	testChassisUUID2 = "bb4fd293-3f8c-42f9-9d72-4afa984727b3"
 )
 
-func buildTestData(routers []*nbdb.LogicalRouter, lrps []*nbdb.LogicalRouterPort) []libovsdb.TestData {
-	nbData := make([]libovsdb.TestData, 0, len(routers)+len(lrps))
-
-	for _, router := range routers {
-		nbData = append(nbData, router)
-	}
-
-	for _, lrp := range lrps {
-		nbData = append(nbData, lrp)
-	}
-
-	return nbData
-}
-
 func setupTestHarnessForTest(t *testing.T, nbData []libovsdb.TestData) (client.Client, *libovsdb.Context) {
 	t.Helper()
 

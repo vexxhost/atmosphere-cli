@@ -1,6 +1,9 @@
 package cli
 
 import (
+	"fmt"
+	"os"
+
 	"github.com/spf13/cobra"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 )
@@ -15,8 +18,9 @@ func NewRootCommand() *cobra.Command {
 		Short: "Atmosphere CLI",
 		Long:  `Atmosphere is a tool for managing cloud infrastructure deployments.`,
 		Run: func(cmd *cobra.Command, args []string) {
-			// Show help if no subcommand is provided
-			cmd.Help()
+			if err := cmd.Help(); err != nil {
+				fmt.Fprintf(os.Stderr, "Error showing help: %v\n", err)
+			}
 		},
 	}
 

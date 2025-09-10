@@ -24,6 +24,7 @@ const (
 	testPortUUID2    = "1a3a3c85-bf28-4285-9a64-44685309b49d"
 	testChassisUUID  = "aa3fd293-3f8c-42f9-9d72-4afa984727b3"
 	testChassisUUID2 = "bb4fd293-3f8c-42f9-9d72-4afa984727b3"
+	testChassisUUID3 = "cc4fd293-3f8c-42f9-9d72-4afa984727b3"
 )
 
 func setupTestHarnessForTest(t *testing.T, nbData []libovsdb.TestData) (client.Client, *libovsdb.Context) {
@@ -500,7 +501,7 @@ func TestRouter_Failover(t *testing.T) {
 			errorContains:        "only one gateway chassis",
 		},
 		{
-			name: "multiple gateway chassis with different priorities",
+			name: "dual gateway chassis",
 			nbData: []libovsdb.TestData{
 				&nbdb.LogicalRouter{
 					Name:  "neutron-" + testRouterUUID,
@@ -530,6 +531,45 @@ func TestRouter_Failover(t *testing.T) {
 				},
 			},
 			expectedInitialAgent:  "gwc-2",
+			expectedFailoverAgent: "gwc-1",
+		},
+		{
+			name: "triple gateway chassis",
+			nbData: []libovsdb.TestData{
+				&nbdb.LogicalRouter{
+					Name:  "neutron-" + testRouterUUID,
+					Ports: []string{testPortUUID1, testPortUUID2},
+				},
+				&nbdb.LogicalRouterPort{
+					UUID:           testPortUUID1,
+					Name:           "lrp-1",
+					GatewayChassis: []string{testChassisUUID, testChassisUUID2, testChassisUUID3},
+				},
+				&nbdb.LogicalRouterPort{
+					UUID:           testPortUUID2,
+					Name:           "lrp-2",
+					GatewayChassis: []string{},
+				},
+				&nbdb.GatewayChassis{
+					UUID:        testChassisUUID,
+					Name:        "lrp-1_gwc-1",
+					ChassisName: "gwc-1",
+					Priority:    1,
+				},
+				&nbdb.GatewayChassis{
+					UUID:        testChassisUUID2,
+					Name:        "lrp-1_gwc-2",
+					ChassisName: "gwc-2",
+					Priority:    2,
+				},
+				&nbdb.GatewayChassis{
+					UUID:        testChassisUUID3,
+					Name:        "lrp-1_gwc-3",
+					ChassisName: "gwc-3",
+					Priority:    3,
+				},
+			},
+			expectedInitialAgent:  "gwc-3",
 			expectedFailoverAgent: "gwc-1",
 		},
 	}

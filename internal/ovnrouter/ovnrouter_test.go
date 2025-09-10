@@ -34,6 +34,9 @@ func setupTestHarnessForTest(t *testing.T, nbData []libovsdb.TestData) (client.C
 	}, nil)
 	require.NoError(t, err)
 
+	// NOTE(mnaser): The following code simulates the `status` column which
+	//               was added in v23.09 that includes specifically the
+	//               `hosting-chassis` field.
 	nbClient.Cache().AddEventHandler(&cache.EventHandlerFuncs{
 		AddFunc: func(table string, model model.Model) {
 			if table == nbdb.LogicalRouterPortTable {
@@ -179,7 +182,7 @@ func TestRouter_LogicalRouterPorts(t *testing.T) {
 			router, err := GetByName(ctx, nbClient, "neutron-"+testRouterUUID)
 			require.NoError(t, err)
 
-			ports, err := router.LogicalRouterPorts(ctx, nbClient)
+			ports, err := router.LogicalRouterPorts(ctx)
 			require.NoError(t, err)
 
 			require.Len(t, ports, len(tt.expected))
@@ -301,7 +304,7 @@ func TestRouter_GatewayChassis(t *testing.T) {
 			router, err := GetByName(ctx, nbClient, "neutron-"+testRouterUUID)
 			require.NoError(t, err)
 
-			gcs, err := router.GatewayChassis(ctx, nbClient)
+			gcs, err := router.GatewayChassis(ctx)
 			require.NoError(t, err)
 
 			require.Len(t, gcs, len(tt.expected))
@@ -422,7 +425,7 @@ func TestRouter_HostingAgent(t *testing.T) {
 			//               reconcile and update the status field.
 			time.Sleep(1 * time.Millisecond)
 
-			agent, err := router.HostingAgent(ctx, nbClient)
+			agent, err := router.HostingAgent(ctx)
 
 			if tt.expectError {
 				require.Error(t, err)
@@ -547,12 +550,12 @@ func TestRouter_Failover(t *testing.T) {
 			time.Sleep(1 * time.Millisecond)
 
 			if tt.expectedInitialAgent != "" {
-				agent, err := router.HostingAgent(ctx, nbClient)
+				agent, err := router.HostingAgent(ctx)
 				require.NoError(t, err)
 				assert.Equal(t, tt.expectedInitialAgent, agent)
 			}
 
-			err = router.Failover(ctx, nbClient)
+			err = router.Failover(ctx)
 
 			if tt.expectError {
 				require.Error(t, err)
@@ -563,7 +566,7 @@ func TestRouter_Failover(t *testing.T) {
 				require.NoError(t, err)
 
 				if tt.expectedFailoverAgent != "" {
-					agent, err := router.HostingAgent(ctx, nbClient)
+					agent, err := router.HostingAgent(ctx)
 					require.NoError(t, err)
 					assert.Equal(t, tt.expectedFailoverAgent, agent)
 				}

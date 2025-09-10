@@ -15,6 +15,7 @@ import (
 type Router struct {
 	UUID string
 
+	client.Client
 	nbdb.LogicalRouter
 }
 
@@ -30,6 +31,7 @@ func GetByName(ctx context.Context, client client.Client, name string) (*Router,
 
 	return &Router{
 		UUID:          strings.TrimPrefix(lrs[0].Name, "neutron-"),
+		Client:        client,
 		LogicalRouter: lrs[0],
 	}, nil
 }
@@ -51,12 +53,12 @@ func List(ctx context.Context, client client.Client) ([]Router, error) {
 	return result, nil
 }
 
-func (r *Router) LogicalRouterPorts(ctx context.Context, client client.Client) ([]nbdb.LogicalRouterPort, error) {
+func (r *Router) LogicalRouterPorts(ctx context.Context) ([]nbdb.LogicalRouterPort, error) {
 	result := make([]nbdb.LogicalRouterPort, 0, len(r.Ports))
 
 	for _, portUUID := range r.Ports {
 		lrp := nbdb.LogicalRouterPort{UUID: portUUID}
-		if err := client.Get(ctx, &lrp); err != nil {
+		if err := r.Client.Get(ctx, &lrp); err != nil {
 			return nil, fmt.Errorf("failed to get logical router port %q for router %q: %w", portUUID, r.UUID, err)
 		}
 
@@ -66,8 +68,8 @@ func (r *Router) LogicalRouterPorts(ctx context.Context, client client.Client) (
 	return result, nil
 }
 
-func (r *Router) GatewayChassis(ctx context.Context, client client.Client) ([]nbdb.GatewayChassis, error) {
-	lrps, err := r.LogicalRouterPorts(ctx, client)
+func (r *Router) GatewayChassis(ctx context.Context) ([]nbdb.GatewayChassis, error) {
+	lrps, err := r.LogicalRouterPorts(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -77,7 +79,7 @@ func (r *Router) GatewayChassis(ctx context.Context, client client.Client) ([]nb
 	for _, lrp := range lrps {
 		for _, gcUUID := range lrp.GatewayChassis {
 			gc := nbdb.GatewayChassis{UUID: gcUUID}
-			if err := client.Get(ctx, &gc); err != nil {
+			if err := r.Client.Get(ctx, &gc); err != nil {
 				return nil, fmt.Errorf("failed to get gateway chassis %q for logical router port %q: %w", gcUUID, lrp.UUID, err)
 			}
 
@@ -88,8 +90,8 @@ func (r *Router) GatewayChassis(ctx context.Context, client client.Client) ([]nb
 	return result, nil
 }
 
-func (r *Router) HostingAgent(ctx context.Context, client client.Client) (string, error) {
-	lrps, err := r.LogicalRouterPorts(ctx, client)
+func (r *Router) HostingAgent(ctx context.Context) (string, error) {
+	lrps, err := r.LogicalRouterPorts(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -125,8 +127,8 @@ func (r *Router) HostingAgent(ctx context.Context, client client.Client) (string
 	return agent, nil
 }
 
-func (r *Router) Failover(ctx context.Context, client client.Client) error {
-	gcs, err := r.GatewayChassis(ctx, client)
+func (r *Router) Failover(ctx context.Context) error {
+	gcs, err := r.GatewayChassis(ctx)
 	if err != nil {
 		return err
 	}

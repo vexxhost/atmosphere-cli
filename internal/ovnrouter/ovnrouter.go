@@ -101,6 +101,11 @@ func (r *Router) HostingAgent(ctx context.Context, client client.Client) (string
 	var agent string
 
 	for _, lrp := range lrps {
+		// NOTE(mnaser): Skip ports that are not external gateways.
+		if len(lrp.GatewayChassis) == 0 {
+			continue
+		}
+
 		agentChassis, ok := lrp.Status["hosting-chassis"]
 		if !ok {
 			return "", fmt.Errorf("no hosting-chassis found in status for logical router port %q", lrp.UUID)
@@ -113,5 +118,29 @@ func (r *Router) HostingAgent(ctx context.Context, client client.Client) (string
 		}
 	}
 
+	if agent == "" {
+		return "", fmt.Errorf("no hosting-chassis found for any logical router port of router %q", r.UUID)
+	}
+
 	return agent, nil
+}
+
+func (r *Router) Failover(ctx context.Context, client client.Client) error {
+	gcs, err := r.GatewayChassis(ctx, client)
+	if err != nil {
+		return err
+	}
+
+	if len(gcs) == 0 {
+		return fmt.Errorf("no gateway chassis found for router %q", r.UUID)
+	}
+
+	if len(gcs) == 1 {
+		return fmt.Errorf("only one gateway chassis found for router %q, cannot failover", r.UUID)
+	}
+
+	// TODO: implement logic to change priorities and trigger failover
+	// TODO: wait for the router to be hosted on the new agent
+
+	return nil
 }

@@ -6,8 +6,11 @@ package ovnrouter
 import (
 	"context"
 	"testing"
+	"time"
 
+	"github.com/ovn-kubernetes/libovsdb/cache"
 	"github.com/ovn-kubernetes/libovsdb/client"
+	"github.com/ovn-kubernetes/libovsdb/model"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/stretchr/testify/assert"
@@ -30,6 +33,40 @@ func setupTestHarnessForTest(t *testing.T, nbData []libovsdb.TestData) (client.C
 		NBData: nbData,
 	}, nil)
 	require.NoError(t, err)
+
+	nbClient.Cache().AddEventHandler(&cache.EventHandlerFuncs{
+		AddFunc: func(table string, model model.Model) {
+			if table == nbdb.LogicalRouterPortTable {
+				lrp := model.(*nbdb.LogicalRouterPort)
+
+				var selected *nbdb.GatewayChassis
+				for _, gcUUID := range lrp.GatewayChassis {
+					gc := nbdb.GatewayChassis{UUID: gcUUID}
+					err := nbClient.Get(context.TODO(), &gc)
+					require.NoError(t, err)
+
+					if selected == nil || gc.Priority > selected.Priority {
+						selected = &gc
+					}
+				}
+
+				agentName := ""
+				if selected != nil {
+					agentName = selected.ChassisName
+				}
+
+				lrp.Status = map[string]string{
+					"hosting-chassis": agentName,
+				}
+
+				ops, err := nbClient.Where(lrp).Update(lrp)
+				require.NoError(t, err)
+
+				_, err = nbClient.Transact(context.TODO(), ops...)
+				require.NoError(t, err)
+			}
+		},
+	})
 
 	return nbClient, cleanup
 }
@@ -79,8 +116,8 @@ func TestList(t *testing.T) {
 			require.NoError(t, err)
 
 			require.Len(t, routers, len(tt.expected))
-			for i, expectedUUID := range tt.expected {
-				assert.Equal(t, expectedUUID, routers[i].UUID)
+			for _, router := range routers {
+				assert.Contains(t, tt.expected, router.UUID)
 			}
 		})
 	}
@@ -88,11 +125,9 @@ func TestList(t *testing.T) {
 
 func TestRouter_LogicalRouterPorts(t *testing.T) {
 	tests := []struct {
-		name        string
-		nbData      []libovsdb.TestData
-		expected    []*nbdb.LogicalRouterPort
-		expectError bool
-		errorMsg    string
+		name     string
+		nbData   []libovsdb.TestData
+		expected []string
 	}{
 		{
 			name: "basic",
@@ -104,10 +139,7 @@ func TestRouter_LogicalRouterPorts(t *testing.T) {
 				&nbdb.LogicalRouterPort{UUID: testPortUUID1, Name: "lrp-1"},
 				&nbdb.LogicalRouterPort{UUID: testPortUUID2, Name: "lrp-2"},
 			},
-			expected: []*nbdb.LogicalRouterPort{
-				{UUID: testPortUUID1, Name: "lrp-1"},
-				{UUID: testPortUUID2, Name: "lrp-2"},
-			},
+			expected: []string{testPortUUID1, testPortUUID2},
 		},
 		{
 			name: "no ports",
@@ -117,7 +149,7 @@ func TestRouter_LogicalRouterPorts(t *testing.T) {
 					Ports: []string{},
 				},
 			},
-			expected: []*nbdb.LogicalRouterPort{},
+			expected: []string{},
 		},
 		{
 			name: "multiple routers",
@@ -133,9 +165,7 @@ func TestRouter_LogicalRouterPorts(t *testing.T) {
 				&nbdb.LogicalRouterPort{UUID: testPortUUID1, Name: "lrp-1"},
 				&nbdb.LogicalRouterPort{UUID: testPortUUID2, Name: "lrp-2"},
 			},
-			expected: []*nbdb.LogicalRouterPort{
-				{UUID: testPortUUID1, Name: "lrp-1"},
-			},
+			expected: []string{testPortUUID1},
 		},
 	}
 
@@ -153,9 +183,8 @@ func TestRouter_LogicalRouterPorts(t *testing.T) {
 			require.NoError(t, err)
 
 			require.Len(t, ports, len(tt.expected))
-			for i, expected := range tt.expected {
-				assert.Equal(t, expected.UUID, ports[i].UUID)
-				assert.Equal(t, expected.Name, ports[i].Name)
+			for _, port := range ports {
+				assert.Contains(t, tt.expected, port.UUID)
 			}
 		})
 	}
@@ -164,7 +193,7 @@ func TestRouter_GatewayChassis(t *testing.T) {
 	tests := []struct {
 		name     string
 		nbData   []libovsdb.TestData
-		expected []nbdb.GatewayChassis
+		expected []string
 	}{
 		{
 			name: "single port with single gateway chassis",
@@ -179,14 +208,13 @@ func TestRouter_GatewayChassis(t *testing.T) {
 					GatewayChassis: []string{testChassisUUID},
 				},
 				&nbdb.GatewayChassis{
-					UUID:     testChassisUUID,
-					Name:     "gwc-1",
-					Priority: 1,
+					UUID:        testChassisUUID,
+					Name:        "lrp-1_gwc-1",
+					ChassisName: "gwc-1",
+					Priority:    1,
 				},
 			},
-			expected: []nbdb.GatewayChassis{
-				{UUID: testChassisUUID, Name: "gwc-1", Priority: 1},
-			},
+			expected: []string{testChassisUUID},
 		},
 		{
 			name: "single port with multiple gateway chassis",
@@ -201,20 +229,19 @@ func TestRouter_GatewayChassis(t *testing.T) {
 					GatewayChassis: []string{testChassisUUID, testChassisUUID2},
 				},
 				&nbdb.GatewayChassis{
-					UUID:     testChassisUUID,
-					Name:     "gwc-1",
-					Priority: 1,
+					UUID:        testChassisUUID,
+					Name:        "lrp-1_gwc-1",
+					ChassisName: "gwc-1",
+					Priority:    1,
 				},
 				&nbdb.GatewayChassis{
-					UUID:     testChassisUUID2,
-					Name:     "gwc-2",
-					Priority: 2,
+					UUID:        testChassisUUID2,
+					Name:        "lrp-1_gwc-2",
+					ChassisName: "gwc-2",
+					Priority:    2,
 				},
 			},
-			expected: []nbdb.GatewayChassis{
-				{UUID: testChassisUUID, Name: "gwc-1", Priority: 1},
-				{UUID: testChassisUUID2, Name: "gwc-2", Priority: 2},
-			},
+			expected: []string{testChassisUUID, testChassisUUID2},
 		},
 		{
 			name: "multiple ports with one holding gateway chassis",
@@ -234,20 +261,19 @@ func TestRouter_GatewayChassis(t *testing.T) {
 					GatewayChassis: []string{},
 				},
 				&nbdb.GatewayChassis{
-					UUID:     testChassisUUID,
-					Name:     "gwc-1",
-					Priority: 1,
+					UUID:        testChassisUUID,
+					Name:        "lrp-1_gwc-1",
+					ChassisName: "gwc-1",
+					Priority:    1,
 				},
 				&nbdb.GatewayChassis{
-					UUID:     testChassisUUID2,
-					Name:     "gwc-2",
-					Priority: 2,
+					UUID:        testChassisUUID2,
+					Name:        "lrp-1_gwc-2",
+					ChassisName: "gwc-2",
+					Priority:    2,
 				},
 			},
-			expected: []nbdb.GatewayChassis{
-				{UUID: testChassisUUID, Name: "gwc-1", Priority: 1},
-				{UUID: testChassisUUID2, Name: "gwc-2", Priority: 2},
-			},
+			expected: []string{testChassisUUID, testChassisUUID2},
 		},
 		{
 			name: "no gateway chassis on port",
@@ -262,7 +288,7 @@ func TestRouter_GatewayChassis(t *testing.T) {
 					GatewayChassis: []string{},
 				},
 			},
-			expected: []nbdb.GatewayChassis{},
+			expected: []string{},
 		},
 	}
 
@@ -279,9 +305,8 @@ func TestRouter_GatewayChassis(t *testing.T) {
 			require.NoError(t, err)
 
 			require.Len(t, gcs, len(tt.expected))
-			for i, expected := range tt.expected {
-				assert.Equal(t, expected.UUID, gcs[i].UUID)
-				assert.Equal(t, expected.Name, gcs[i].Name)
+			for _, gc := range gcs {
+				assert.Contains(t, tt.expected, gc.UUID)
 			}
 		})
 	}
@@ -291,52 +316,67 @@ func TestRouter_HostingAgent(t *testing.T) {
 	tests := []struct {
 		name          string
 		nbData        []libovsdb.TestData
-		router        *nbdb.LogicalRouter
-		lrps          []*nbdb.LogicalRouterPort
 		expectedAgent string
 		expectError   bool
 		errorContains string
 	}{
 		{
-			name: "single agent hosting all ports",
+			name: "single agent hosting gateway port",
 			nbData: []libovsdb.TestData{
 				&nbdb.LogicalRouter{
 					Name:  "neutron-" + testRouterUUID,
 					Ports: []string{testPortUUID1, testPortUUID2},
 				},
 				&nbdb.LogicalRouterPort{
-					UUID:   testPortUUID1,
-					Name:   "lrp-1",
-					Status: map[string]string{"hosting-chassis": testChassisUUID},
+					UUID:           testPortUUID1,
+					Name:           "lrp-1",
+					GatewayChassis: []string{testChassisUUID},
 				},
 				&nbdb.LogicalRouterPort{
-					UUID:   testPortUUID2,
-					Name:   "lrp-2",
-					Status: map[string]string{"hosting-chassis": testChassisUUID},
+					UUID:           testPortUUID2,
+					Name:           "lrp-2",
+					GatewayChassis: []string{},
+				},
+				&nbdb.GatewayChassis{
+					UUID:        testChassisUUID,
+					Name:        "lrp-1_gwc-1",
+					ChassisName: "gwc-1",
+					Priority:    1,
 				},
 			},
-			expectedAgent: testChassisUUID,
+			expectedAgent: "gwc-1",
 		},
 		{
-			name: "multiple agents hosting different ports",
+			name: "multiple agents hosting gateway port",
 			nbData: []libovsdb.TestData{
 				&nbdb.LogicalRouter{
 					Name:  "neutron-" + testRouterUUID,
 					Ports: []string{testPortUUID1, testPortUUID2},
 				},
 				&nbdb.LogicalRouterPort{
-					UUID:   testPortUUID1,
-					Name:   "lrp-1",
-					Status: map[string]string{"hosting-chassis": testChassisUUID},
+					UUID:           testPortUUID1,
+					Name:           "lrp-1",
+					GatewayChassis: []string{testChassisUUID, testChassisUUID2},
 				},
 				&nbdb.LogicalRouterPort{
-					UUID:   testPortUUID2,
-					Name:   "lrp-2",
-					Status: map[string]string{"hosting-chassis": testChassisUUID2},
+					UUID:           testPortUUID2,
+					Name:           "lrp-2",
+					GatewayChassis: []string{},
+				},
+				&nbdb.GatewayChassis{
+					UUID:        testChassisUUID,
+					Name:        "lrp-1_gwc-1",
+					ChassisName: "gwc-1",
+					Priority:    1,
+				},
+				&nbdb.GatewayChassis{
+					UUID:        testChassisUUID2,
+					Name:        "lrp-1_gwc-2",
+					ChassisName: "gwc-2",
+					Priority:    2,
 				},
 			},
-			expectError:   true,
-			errorContains: "hosted on multiple agents",
+			expectedAgent: "gwc-2",
 		},
 		{
 			name: "no ports",
@@ -363,19 +403,24 @@ func TestRouter_HostingAgent(t *testing.T) {
 				},
 			},
 			expectError:   true,
-			errorContains: "no hosting-chassis found in status",
+			errorContains: "no hosting-chassis found",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
 
 			nbClient, cleanup := setupTestHarnessForTest(t, tt.nbData)
 			t.Cleanup(cleanup.Cleanup)
 
 			router, err := GetByName(ctx, nbClient, "neutron-"+testRouterUUID)
 			require.NoError(t, err)
+
+			// NOTE(mnaser): I hate this, but this gives a chance to the handlers to
+			//               reconcile and update the status field.
+			time.Sleep(1 * time.Millisecond)
 
 			agent, err := router.HostingAgent(ctx, nbClient)
 
@@ -388,6 +433,140 @@ func TestRouter_HostingAgent(t *testing.T) {
 			} else {
 				require.NoError(t, err)
 				assert.Equal(t, tt.expectedAgent, agent)
+			}
+		})
+	}
+}
+
+func TestRouter_Failover(t *testing.T) {
+	tests := []struct {
+		name                  string
+		nbData                []libovsdb.TestData
+		expectedInitialAgent  string
+		expectedFailoverAgent string
+		expectError           bool
+		errorContains         string
+	}{
+		{
+			name: "no gateway chassis",
+			nbData: []libovsdb.TestData{
+				&nbdb.LogicalRouter{
+					Name:  "neutron-" + testRouterUUID,
+					Ports: []string{testPortUUID1, testPortUUID2},
+				},
+				&nbdb.LogicalRouterPort{
+					UUID:           testPortUUID1,
+					Name:           "lrp-1",
+					GatewayChassis: []string{},
+				},
+				&nbdb.LogicalRouterPort{
+					UUID:           testPortUUID2,
+					Name:           "lrp-2",
+					GatewayChassis: []string{},
+				},
+			},
+			expectError:   true,
+			errorContains: "no gateway chassis found",
+		},
+		{
+			name: "single gateway chassis",
+			nbData: []libovsdb.TestData{
+				&nbdb.LogicalRouter{
+					Name:  "neutron-" + testRouterUUID,
+					Ports: []string{testPortUUID1, testPortUUID2},
+				},
+				&nbdb.LogicalRouterPort{
+					UUID:           testPortUUID1,
+					Name:           "lrp-1",
+					GatewayChassis: []string{testChassisUUID},
+				},
+				&nbdb.LogicalRouterPort{
+					UUID:           testPortUUID2,
+					Name:           "lrp-2",
+					GatewayChassis: []string{},
+				},
+				&nbdb.GatewayChassis{
+					UUID:        testChassisUUID,
+					Name:        "lrp-1_gwc-1",
+					ChassisName: "gwc-1",
+					Priority:    10,
+				},
+			},
+			expectedInitialAgent: "gwc-1",
+			expectError:          true,
+			errorContains:        "only one gateway chassis",
+		},
+		{
+			name: "multiple gateway chassis with different priorities",
+			nbData: []libovsdb.TestData{
+				&nbdb.LogicalRouter{
+					Name:  "neutron-" + testRouterUUID,
+					Ports: []string{testPortUUID1, testPortUUID2},
+				},
+				&nbdb.LogicalRouterPort{
+					UUID:           testPortUUID1,
+					Name:           "lrp-1",
+					GatewayChassis: []string{testChassisUUID, testChassisUUID2},
+				},
+				&nbdb.LogicalRouterPort{
+					UUID:           testPortUUID2,
+					Name:           "lrp-2",
+					GatewayChassis: []string{},
+				},
+				&nbdb.GatewayChassis{
+					UUID:        testChassisUUID,
+					Name:        "lrp-1_gwc-1",
+					ChassisName: "gwc-1",
+					Priority:    1,
+				},
+				&nbdb.GatewayChassis{
+					UUID:        testChassisUUID2,
+					Name:        "lrp-1_gwc-2",
+					ChassisName: "gwc-2",
+					Priority:    2,
+				},
+			},
+			expectedInitialAgent:  "gwc-2",
+			expectedFailoverAgent: "gwc-1",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			nbClient, cleanup := setupTestHarnessForTest(t, tt.nbData)
+			t.Cleanup(cleanup.Cleanup)
+
+			router, err := GetByName(ctx, nbClient, "neutron-"+testRouterUUID)
+			require.NoError(t, err)
+
+			// NOTE(mnaser): I hate this, but this gives a chance to the handlers to
+			//               reconcile and update the status field.
+			time.Sleep(1 * time.Millisecond)
+
+			if tt.expectedInitialAgent != "" {
+				agent, err := router.HostingAgent(ctx, nbClient)
+				require.NoError(t, err)
+				assert.Equal(t, tt.expectedInitialAgent, agent)
+			}
+
+			err = router.Failover(ctx, nbClient)
+
+			if tt.expectError {
+				require.Error(t, err)
+				if tt.errorContains != "" {
+					assert.Contains(t, err.Error(), tt.errorContains)
+				}
+			} else {
+				require.NoError(t, err)
+
+				if tt.expectedFailoverAgent != "" {
+					agent, err := router.HostingAgent(ctx, nbClient)
+					require.NoError(t, err)
+					assert.Equal(t, tt.expectedFailoverAgent, agent)
+				}
 			}
 		})
 	}

@@ -58,7 +58,7 @@ func (r *Router) LogicalRouterPorts(ctx context.Context) ([]nbdb.LogicalRouterPo
 
 	for _, portUUID := range r.Ports {
 		lrp := nbdb.LogicalRouterPort{UUID: portUUID}
-		if err := r.Client.Get(ctx, &lrp); err != nil {
+		if err := r.Get(ctx, &lrp); err != nil {
 			return nil, fmt.Errorf("failed to get logical router port %q for router %q: %w", portUUID, r.UUID, err)
 		}
 
@@ -79,7 +79,7 @@ func (r *Router) GatewayChassis(ctx context.Context) ([]nbdb.GatewayChassis, err
 	for _, lrp := range lrps {
 		for _, gcUUID := range lrp.GatewayChassis {
 			gc := nbdb.GatewayChassis{UUID: gcUUID}
-			if err := r.Client.Get(ctx, &gc); err != nil {
+			if err := r.Get(ctx, &gc); err != nil {
 				return nil, fmt.Errorf("failed to get gateway chassis %q for logical router port %q: %w", gcUUID, lrp.UUID, err)
 			}
 
@@ -169,7 +169,7 @@ func (r *Router) Failover(ctx context.Context) error {
 	var highestGC, lowestGC *nbdb.GatewayChassis
 	highestPriority := 0
 	lowestPriority := -1
-	
+
 	for i := range gcs {
 		if gcs[i].Priority > highestPriority {
 			highestPriority = gcs[i].Priority
@@ -192,19 +192,19 @@ func (r *Router) Failover(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to prepare update for gateway chassis %q: %w", highestGC.UUID, err)
 	}
-	
+
 	// Update lowest priority GC to have highest priority
 	lowestGC.Priority = tempPriority
 	updateOps2, err := r.Client.Where(&nbdb.GatewayChassis{UUID: lowestGC.UUID}).Update(lowestGC)
 	if err != nil {
 		return fmt.Errorf("failed to prepare update for gateway chassis %q: %w", lowestGC.UUID, err)
 	}
-	
+
 	// Combine operations
 	operations := append(updateOps1, updateOps2...)
 
 	// Execute the transaction
-	results, err := r.Client.Transact(ctx, operations...)
+	results, err := r.Transact(ctx, operations...)
 	if err != nil {
 		return fmt.Errorf("failed to update gateway chassis priorities: %w", err)
 	}
@@ -219,6 +219,6 @@ func (r *Router) Failover(ctx context.Context) error {
 	// Wait for the router to be hosted on the new agent
 	// In a real environment, OVN would update the status field automatically
 	// For now, we just return success as the priority swap has been committed
-	
+
 	return nil
 }

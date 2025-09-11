@@ -9,6 +9,8 @@ import (
 	"strings"
 
 	"github.com/ovn-kubernetes/libovsdb/client"
+	"github.com/ovn-kubernetes/libovsdb/model"
+	"github.com/ovn-kubernetes/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 )
 
@@ -185,23 +187,27 @@ func (r *Router) Failover(ctx context.Context) error {
 		return fmt.Errorf("unable to determine gateway chassis to swap for router %q", r.UUID)
 	}
 
-	// Swap the priorities between highest and lowest
-	tempPriority := highestGC.Priority
-	highestGC.Priority = lowestGC.Priority
-	updateOps1, err := r.Client.Where(&nbdb.GatewayChassis{UUID: highestGC.UUID}).Update(highestGC)
-	if err != nil {
-		return fmt.Errorf("failed to prepare update for gateway chassis %q: %w", highestGC.UUID, err)
+	// Prepare the priority swap updates
+	updates := []model.Model{
+		&nbdb.GatewayChassis{
+			UUID:     highestGC.UUID,
+			Priority: lowestGC.Priority,
+		},
+		&nbdb.GatewayChassis{
+			UUID:     lowestGC.UUID,
+			Priority: highestGC.Priority,
+		},
 	}
 
-	// Update lowest priority GC to have highest priority
-	lowestGC.Priority = tempPriority
-	updateOps2, err := r.Client.Where(&nbdb.GatewayChassis{UUID: lowestGC.UUID}).Update(lowestGC)
-	if err != nil {
-		return fmt.Errorf("failed to prepare update for gateway chassis %q: %w", lowestGC.UUID, err)
+	// Build all operations at once
+	var operations []ovsdb.Operation
+	for _, update := range updates {
+		ops, err := r.Client.Where(update).Update(update)
+		if err != nil {
+			return fmt.Errorf("failed to prepare update for gateway chassis: %w", err)
+		}
+		operations = append(operations, ops...)
 	}
-
-	// Combine operations
-	operations := append(updateOps1, updateOps2...)
 
 	// Execute the transaction
 	results, err := r.Transact(ctx, operations...)

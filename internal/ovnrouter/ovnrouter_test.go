@@ -36,11 +36,11 @@ func setupTestHarnessForTest(t *testing.T, nbData []libovsdb.TestData) (client.C
 	require.NoError(t, err)
 
 	// Helper function to update logical router port status based on gateway chassis priorities
-	updateLogicalRouterPortStatus := func(lrp *nbdb.LogicalRouterPort) {
+	updateLogicalRouterPortStatus := func(ctx context.Context, lrp *nbdb.LogicalRouterPort) {
 		var selected *nbdb.GatewayChassis
 		for _, gcUUID := range lrp.GatewayChassis {
 			gc := nbdb.GatewayChassis{UUID: gcUUID}
-			err := nbClient.Get(context.TODO(), &gc)
+			err := nbClient.Get(ctx, &gc)
 			require.NoError(t, err)
 
 			if selected == nil || gc.Priority > selected.Priority {
@@ -60,7 +60,7 @@ func setupTestHarnessForTest(t *testing.T, nbData []libovsdb.TestData) (client.C
 		ops, err := nbClient.Where(lrp).Update(lrp)
 		require.NoError(t, err)
 
-		_, err = nbClient.Transact(context.TODO(), ops...)
+		_, err = nbClient.Transact(ctx, ops...)
 		require.NoError(t, err)
 	}
 
@@ -71,12 +71,19 @@ func setupTestHarnessForTest(t *testing.T, nbData []libovsdb.TestData) (client.C
 		AddFunc: func(table string, model model.Model) {
 			if table == nbdb.LogicalRouterPortTable {
 				lrp := model.(*nbdb.LogicalRouterPort)
-				updateLogicalRouterPortStatus(lrp)
+
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+
+				updateLogicalRouterPortStatus(ctx, lrp)
 			}
 		},
 		UpdateFunc: func(table string, oldModel, newModel model.Model) {
 			if table == nbdb.GatewayChassisTable {
 				gc := newModel.(*nbdb.GatewayChassis)
+
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
 
 				var lrps []nbdb.LogicalRouterPort
 				err := nbClient.WhereCache(func(lrp *nbdb.LogicalRouterPort) bool {
@@ -86,11 +93,11 @@ func setupTestHarnessForTest(t *testing.T, nbData []libovsdb.TestData) (client.C
 						}
 					}
 					return false
-				}).List(context.TODO(), &lrps)
+				}).List(ctx, &lrps)
 				require.NoError(t, err)
 
 				for _, lrp := range lrps {
-					updateLogicalRouterPortStatus(&lrp)
+					updateLogicalRouterPortStatus(ctx, &lrp)
 				}
 			}
 		},
@@ -135,7 +142,8 @@ func TestList(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
 
 			nbClient, cleanup := setupTestHarnessForTest(t, tt.nbData)
 			t.Cleanup(cleanup.Cleanup)
@@ -199,7 +207,8 @@ func TestRouter_LogicalRouterPorts(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
 
 			nbClient, cleanup := setupTestHarnessForTest(t, tt.nbData)
 			t.Cleanup(cleanup.Cleanup)
@@ -322,7 +331,9 @@ func TestRouter_GatewayChassis(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+
 			nbClient, cleanup := setupTestHarnessForTest(t, tt.nbData)
 			t.Cleanup(cleanup.Cleanup)
 
@@ -437,7 +448,7 @@ func TestRouter_HostingAgent(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx, cancel := context.WithCancel(context.Background())
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 
 			nbClient, cleanup := setupTestHarnessForTest(t, tt.nbData)
@@ -600,7 +611,7 @@ func TestRouter_Failover(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx, cancel := context.WithCancel(context.Background())
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 
 			nbClient, cleanup := setupTestHarnessForTest(t, tt.nbData)
@@ -630,10 +641,6 @@ func TestRouter_Failover(t *testing.T) {
 				require.NoError(t, err)
 
 				if tt.expectedFailoverAgent != "" {
-					// NOTE(mnaser): I hate this, but this gives a chance to the handlers to
-					//               reconcile and update the status field.
-					time.Sleep(10 * time.Millisecond)
-
 					agent, err := router.HostingAgent(ctx)
 					require.NoError(t, err)
 					assert.Equal(t, tt.expectedFailoverAgent, agent)

@@ -6,9 +6,13 @@ package ovnrouter
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/ovn-kubernetes/libovsdb/client"
+	"github.com/ovn-kubernetes/libovsdb/model"
+	"github.com/ovn-kubernetes/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 )
 
@@ -58,7 +62,7 @@ func (r *Router) LogicalRouterPorts(ctx context.Context) ([]nbdb.LogicalRouterPo
 
 	for _, portUUID := range r.Ports {
 		lrp := nbdb.LogicalRouterPort{UUID: portUUID}
-		if err := r.Client.Get(ctx, &lrp); err != nil {
+		if err := r.Get(ctx, &lrp); err != nil {
 			return nil, fmt.Errorf("failed to get logical router port %q for router %q: %w", portUUID, r.UUID, err)
 		}
 
@@ -79,7 +83,7 @@ func (r *Router) GatewayChassis(ctx context.Context) ([]nbdb.GatewayChassis, err
 	for _, lrp := range lrps {
 		for _, gcUUID := range lrp.GatewayChassis {
 			gc := nbdb.GatewayChassis{UUID: gcUUID}
-			if err := r.Client.Get(ctx, &gc); err != nil {
+			if err := r.Get(ctx, &gc); err != nil {
 				return nil, fmt.Errorf("failed to get gateway chassis %q for logical router port %q: %w", gcUUID, lrp.UUID, err)
 			}
 
@@ -127,6 +131,35 @@ func (r *Router) HostingAgent(ctx context.Context) (string, error) {
 	return agent, nil
 }
 
+// Failover triggers a failover of the router from its current hosting gateway chassis
+// to the next available one by swapping priorities between the highest and lowest.
+//
+// The failover mechanism swaps the highest priority (currently active) gateway chassis
+// with the lowest priority gateway chassis. This simple approach works well for
+// individual router failovers.
+//
+// After updating the priorities, the function waits for OVN to actually move the router
+// to the new hosting chassis. The function polls every 500ms until the router is hosted
+// on the expected chassis. The caller must provide a context with an appropriate deadline
+// to prevent indefinite waiting.
+//
+// Note: When draining multiple nodes sequentially in a 3-node cluster, this approach
+// may cause some routers to failover twice. For example:
+//   - Initial: A=3 (active), B=2, C=1
+//   - Drain A: C=3 (active), B=2, A=1 (swap A↔C)
+//   - Drain B: No change (B not highest)
+//   - Drain C: A=3 (active), B=2, C=1 (swap C↔A, router back on A)
+//
+// For optimal sequential node draining, a controller-aware orchestration layer
+// should coordinate failovers to minimize total router movements.
+//
+// Example with 3 gateway chassis:
+//
+//	Initial: A(priority=3, active), B(priority=2), C(priority=1)
+//	After failover: C(priority=3, active), B(priority=2), A(priority=1)
+//
+// The function requires at least 2 gateway chassis to perform a failover.
+// Returns an error if no gateway chassis are found or if only one exists.
 func (r *Router) Failover(ctx context.Context) error {
 	gcs, err := r.GatewayChassis(ctx)
 	if err != nil {
@@ -141,8 +174,74 @@ func (r *Router) Failover(ctx context.Context) error {
 		return fmt.Errorf("only one gateway chassis found for router %q, cannot failover", r.UUID)
 	}
 
-	// TODO: implement logic to change priorities and trigger failover
-	// TODO: wait for the router to be hosted on the new agent
+	// NOTE(mnaser): For simplicity, we sort the gateway chassis by priority from
+	//               lowest to the highest.
+	sort.Slice(gcs, func(i, j int) bool {
+		return gcs[i].Priority < gcs[j].Priority
+	})
 
-	return nil
+	// NOTE(mnaser): The `nextGC` in this case is the one with the lowest priority
+	//               which will become the active one after the failover.  The `currentGC`
+	//               is the one with the highest priority which is currently active.
+	nextGC := &gcs[0]
+	currentGC := &gcs[len(gcs)-1]
+
+	if nextGC.UUID == currentGC.UUID {
+		return fmt.Errorf("unable to determine gateway chassis to swap for router %q", r.UUID)
+	}
+
+	// NOTE(mnaser): Swap priorities between the current active and the next one.  Once
+	//               we do this, OVN should automatically move the router to the new
+	//               hosting chassis.
+	updates := []model.Model{
+		&nbdb.GatewayChassis{
+			UUID:     currentGC.UUID,
+			Priority: nextGC.Priority,
+		},
+		&nbdb.GatewayChassis{
+			UUID:     nextGC.UUID,
+			Priority: currentGC.Priority,
+		},
+	}
+
+	var operations []ovsdb.Operation
+	for _, update := range updates {
+		ops, err := r.Client.Where(update).Update(update)
+		if err != nil {
+			return fmt.Errorf("failed to prepare update for gateway chassis: %w", err)
+		}
+
+		operations = append(operations, ops...)
+	}
+
+	results, err := r.Transact(ctx, operations...)
+	if err != nil {
+		return fmt.Errorf("failed to update gateway chassis priorities: %w", err)
+	}
+
+	if _, err := ovsdb.CheckOperationResults(results, operations); err != nil {
+		return err
+	}
+
+	// NOTE(mnaser): The hosting agent should be the one in the `nextGC` now.
+	expectedHost := nextGC.ChassisName
+
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("failed waiting for router %q to failover to %q: %w", r.UUID, expectedHost, ctx.Err())
+		case <-ticker.C:
+			currentHost, err := r.HostingAgent(ctx)
+			if err != nil {
+				continue
+			}
+
+			if currentHost == expectedHost {
+				return nil
+			}
+		}
+	}
 }

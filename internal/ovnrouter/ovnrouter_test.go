@@ -35,6 +35,35 @@ func setupTestHarnessForTest(t *testing.T, nbData []libovsdb.TestData) (client.C
 	}, nil)
 	require.NoError(t, err)
 
+	// Helper function to update logical router port status based on gateway chassis priorities
+	updateLogicalRouterPortStatus := func(lrp *nbdb.LogicalRouterPort) {
+		var selected *nbdb.GatewayChassis
+		for _, gcUUID := range lrp.GatewayChassis {
+			gc := nbdb.GatewayChassis{UUID: gcUUID}
+			err := nbClient.Get(context.TODO(), &gc)
+			require.NoError(t, err)
+
+			if selected == nil || gc.Priority > selected.Priority {
+				selected = &gc
+			}
+		}
+
+		agentName := ""
+		if selected != nil {
+			agentName = selected.ChassisName
+		}
+
+		lrp.Status = map[string]string{
+			"hosting-chassis": agentName,
+		}
+
+		ops, err := nbClient.Where(lrp).Update(lrp)
+		require.NoError(t, err)
+
+		_, err = nbClient.Transact(context.TODO(), ops...)
+		require.NoError(t, err)
+	}
+
 	// NOTE(mnaser): The following code simulates the `status` column which
 	//               was added in v23.09 that includes specifically the
 	//               `hosting-chassis` field.
@@ -42,32 +71,27 @@ func setupTestHarnessForTest(t *testing.T, nbData []libovsdb.TestData) (client.C
 		AddFunc: func(table string, model model.Model) {
 			if table == nbdb.LogicalRouterPortTable {
 				lrp := model.(*nbdb.LogicalRouterPort)
+				updateLogicalRouterPortStatus(lrp)
+			}
+		},
+		UpdateFunc: func(table string, oldModel, newModel model.Model) {
+			if table == nbdb.GatewayChassisTable {
+				gc := newModel.(*nbdb.GatewayChassis)
 
-				var selected *nbdb.GatewayChassis
-				for _, gcUUID := range lrp.GatewayChassis {
-					gc := nbdb.GatewayChassis{UUID: gcUUID}
-					err := nbClient.Get(context.TODO(), &gc)
-					require.NoError(t, err)
-
-					if selected == nil || gc.Priority > selected.Priority {
-						selected = &gc
+				var lrps []nbdb.LogicalRouterPort
+				err := nbClient.WhereCache(func(lrp *nbdb.LogicalRouterPort) bool {
+					for _, gcUUID := range lrp.GatewayChassis {
+						if gcUUID == gc.UUID {
+							return true
+						}
 					}
-				}
-
-				agentName := ""
-				if selected != nil {
-					agentName = selected.ChassisName
-				}
-
-				lrp.Status = map[string]string{
-					"hosting-chassis": agentName,
-				}
-
-				ops, err := nbClient.Where(lrp).Update(lrp)
+					return false
+				}).List(context.TODO(), &lrps)
 				require.NoError(t, err)
 
-				_, err = nbClient.Transact(context.TODO(), ops...)
-				require.NoError(t, err)
+				for _, lrp := range lrps {
+					updateLogicalRouterPortStatus(&lrp)
+				}
 			}
 		},
 	})
@@ -424,7 +448,7 @@ func TestRouter_HostingAgent(t *testing.T) {
 
 			// NOTE(mnaser): I hate this, but this gives a chance to the handlers to
 			//               reconcile and update the status field.
-			time.Sleep(1 * time.Millisecond)
+			time.Sleep(10 * time.Millisecond)
 
 			agent, err := router.HostingAgent(ctx)
 
@@ -587,7 +611,7 @@ func TestRouter_Failover(t *testing.T) {
 
 			// NOTE(mnaser): I hate this, but this gives a chance to the handlers to
 			//               reconcile and update the status field.
-			time.Sleep(1 * time.Millisecond)
+			time.Sleep(10 * time.Millisecond)
 
 			if tt.expectedInitialAgent != "" {
 				agent, err := router.HostingAgent(ctx)
@@ -606,6 +630,10 @@ func TestRouter_Failover(t *testing.T) {
 				require.NoError(t, err)
 
 				if tt.expectedFailoverAgent != "" {
+					// NOTE(mnaser): I hate this, but this gives a chance to the handlers to
+					//               reconcile and update the status field.
+					time.Sleep(10 * time.Millisecond)
+
 					agent, err := router.HostingAgent(ctx)
 					require.NoError(t, err)
 					assert.Equal(t, tt.expectedFailoverAgent, agent)

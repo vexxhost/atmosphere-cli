@@ -6,7 +6,9 @@ package ovnrouter
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
+	"time"
 
 	"github.com/ovn-kubernetes/libovsdb/client"
 	"github.com/ovn-kubernetes/libovsdb/model"
@@ -136,6 +138,11 @@ func (r *Router) HostingAgent(ctx context.Context) (string, error) {
 // with the lowest priority gateway chassis. This simple approach works well for
 // individual router failovers.
 //
+// After updating the priorities, the function waits for OVN to actually move the router
+// to the new hosting chassis. The function polls every 500ms until the router is hosted
+// on the expected chassis. The caller must provide a context with an appropriate deadline
+// to prevent indefinite waiting.
+//
 // Note: When draining multiple nodes sequentially in a 3-node cluster, this approach
 // may cause some routers to failover twice. For example:
 //   - Initial: A=3 (active), B=2, C=1
@@ -167,64 +174,74 @@ func (r *Router) Failover(ctx context.Context) error {
 		return fmt.Errorf("only one gateway chassis found for router %q, cannot failover", r.UUID)
 	}
 
-	// Find the highest and lowest priority gateway chassis
-	var highestGC, lowestGC *nbdb.GatewayChassis
-	highestPriority := 0
-	lowestPriority := -1
+	// NOTE(mnaser): For simplicity, we sort the gateway chassis by priority from
+	//               lowest to the highest.
+	sort.Slice(gcs, func(i, j int) bool {
+		return gcs[i].Priority < gcs[j].Priority
+	})
 
-	for i := range gcs {
-		if gcs[i].Priority > highestPriority {
-			highestPriority = gcs[i].Priority
-			highestGC = &gcs[i]
-		}
-		if lowestPriority == -1 || gcs[i].Priority < lowestPriority {
-			lowestPriority = gcs[i].Priority
-			lowestGC = &gcs[i]
-		}
-	}
+	// NOTE(mnaser): The `nextGC` in this case is the one with the lowest priority
+	//               which will become the active one after the failover.  The `currentGC`
+	//               is the one with the highest priority which is currently active.
+	nextGC := &gcs[0]
+	currentGC := &gcs[len(gcs)-1]
 
-	if highestGC == nil || lowestGC == nil || highestGC.UUID == lowestGC.UUID {
+	if nextGC.UUID == currentGC.UUID {
 		return fmt.Errorf("unable to determine gateway chassis to swap for router %q", r.UUID)
 	}
 
-	// Prepare the priority swap updates
+	// NOTE(mnaser): Swap priorities between the current active and the next one.  Once
+	//               we do this, OVN should automatically move the router to the new
+	//               hosting chassis.
 	updates := []model.Model{
 		&nbdb.GatewayChassis{
-			UUID:     highestGC.UUID,
-			Priority: lowestGC.Priority,
+			UUID:     currentGC.UUID,
+			Priority: nextGC.Priority,
 		},
 		&nbdb.GatewayChassis{
-			UUID:     lowestGC.UUID,
-			Priority: highestGC.Priority,
+			UUID:     nextGC.UUID,
+			Priority: currentGC.Priority,
 		},
 	}
 
-	// Build all operations at once
 	var operations []ovsdb.Operation
 	for _, update := range updates {
 		ops, err := r.Client.Where(update).Update(update)
 		if err != nil {
 			return fmt.Errorf("failed to prepare update for gateway chassis: %w", err)
 		}
+
 		operations = append(operations, ops...)
 	}
 
-	// Execute the transaction
 	results, err := r.Transact(ctx, operations...)
 	if err != nil {
 		return fmt.Errorf("failed to update gateway chassis priorities: %w", err)
 	}
 
-	// Check for errors in the transaction results
-	for _, result := range results {
-		if result.Error != "" {
-			return fmt.Errorf("transaction error: %s", result.Error)
-		}
+	if _, err := ovsdb.CheckOperationResults(results, operations); err != nil {
+		return err
 	}
 
-	// Wait for the router to be hosted on the new agent
-	// In a real environment, OVN would update the status field automatically
-	// For now, we just return success as the priority swap has been committed
+	// NOTE(mnaser): The hosting agent should be the one in the `nextGC` now.
+	expectedHost := nextGC.ChassisName
 
-	return nil
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("failed waiting for router %q to failover to %q: %w", r.UUID, expectedHost, ctx.Err())
+		case <-ticker.C:
+			currentHost, err := r.HostingAgent(ctx)
+			if err != nil {
+				continue
+			}
+
+			if currentHost == expectedHost {
+				return nil
+			}
+		}
+	}
 }

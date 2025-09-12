@@ -35,7 +35,7 @@ type Router struct {
 
 // GetObjectKind returns the object kind
 func (r *Router) GetObjectKind() schema.ObjectKind {
-	if r.TypeMeta.Kind == "" {
+	if r.Kind == "" {
 		r.TypeMeta = metav1.TypeMeta{
 			Kind:       "Router",
 			APIVersion: "atmosphere.vexxhost.com/v1",
@@ -66,7 +66,7 @@ type RouterList struct {
 
 // GetObjectKind returns the object kind
 func (r *RouterList) GetObjectKind() schema.ObjectKind {
-	if r.TypeMeta.Kind == "" {
+	if r.Kind == "" {
 		r.TypeMeta = metav1.TypeMeta{
 			Kind:       "RouterList",
 			APIVersion: "atmosphere.vexxhost.com/v1",

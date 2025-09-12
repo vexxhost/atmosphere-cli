@@ -14,13 +14,76 @@ import (
 	"github.com/ovn-org/libovsdb/model"
 	"github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
+// Router represents an OVN router with Kubernetes runtime.Object compatibility
 type Router struct {
-	UUID string
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+	
+	UUID        string   `json:"uuid"`
+	ExternalIPs []string `json:"externalIPs,omitempty"`
+	
+	// Embedded OVN types (not serialized)
+	client.Client      `json:"-"`
+	nbdb.LogicalRouter `json:",inline"`
+}
 
-	client.Client
-	nbdb.LogicalRouter
+// GetObjectKind returns the object kind
+func (r *Router) GetObjectKind() schema.ObjectKind {
+	if r.TypeMeta.Kind == "" {
+		r.TypeMeta = metav1.TypeMeta{
+			Kind:       "Router",
+			APIVersion: "atmosphere.vexxhost.com/v1",
+		}
+	}
+	return &r.TypeMeta
+}
+
+// DeepCopyObject creates a deep copy
+func (r *Router) DeepCopyObject() runtime.Object {
+	return &Router{
+		TypeMeta:      r.TypeMeta,
+		ObjectMeta:    r.ObjectMeta,
+		UUID:          r.UUID,
+		ExternalIPs:   append([]string(nil), r.ExternalIPs...),
+		Client:        r.Client,
+		LogicalRouter: r.LogicalRouter,
+	}
+}
+
+// RouterList represents a list of routers
+type RouterList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
+	Items           []Router `json:"items"`
+}
+
+// GetObjectKind returns the object kind
+func (r *RouterList) GetObjectKind() schema.ObjectKind {
+	if r.TypeMeta.Kind == "" {
+		r.TypeMeta = metav1.TypeMeta{
+			Kind:       "RouterList",
+			APIVersion: "atmosphere.vexxhost.com/v1",
+		}
+	}
+	return &r.TypeMeta
+}
+
+// DeepCopyObject creates a deep copy
+func (r *RouterList) DeepCopyObject() runtime.Object {
+	items := make([]Router, len(r.Items))
+	for i, item := range r.Items {
+		items[i] = *item.DeepCopyObject().(*Router)
+	}
+	return &RouterList{
+		TypeMeta: r.TypeMeta,
+		ListMeta: r.ListMeta,
+		Items:    items,
+	}
 }
 
 func GetByName(ctx context.Context, client client.Client, name string) (*Router, error) {
@@ -40,19 +103,36 @@ func GetByName(ctx context.Context, client client.Client, name string) (*Router,
 	}, nil
 }
 
-func List(ctx context.Context, client client.Client) ([]Router, error) {
+func List(ctx context.Context, c client.Client) ([]Router, error) {
 	var routers []nbdb.LogicalRouter
-	if err := client.List(ctx, &routers); err != nil {
+	if err := c.List(ctx, &routers); err != nil {
 		return nil, err
 	}
 
 	result := make([]Router, 0, len(routers))
 	for _, r := range routers {
-		result = append(result, Router{
+		router := Router{
+			TypeMeta: metav1.TypeMeta{
+				Kind:       "Router",
+				APIVersion: "atmosphere.vexxhost.com/v1",
+			},
 			UUID:          strings.TrimPrefix(r.Name, "neutron-"),
-			Client:        client,
+			Client:        c,
 			LogicalRouter: r,
-		})
+		}
+		
+		// Set ObjectMeta with the name
+		router.ObjectMeta = metav1.ObjectMeta{
+			Name: router.UUID,
+		}
+		
+		// Fetch external IPs for this router
+		if externalIPs, err := router.GetExternalIPs(ctx); err == nil {
+			router.ExternalIPs = externalIPs
+		}
+		// We ignore errors here to not fail the entire listing
+		
+		result = append(result, router)
 	}
 
 	return result, nil

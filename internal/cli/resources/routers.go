@@ -27,7 +27,7 @@ func (r *RouterResource) Aliases() []string {
 
 // List fetches routers and returns them as a runtime.Object
 func (r *RouterResource) List(ctx context.Context, client client.Client, names []string) (runtime.Object, error) {
-	// Fetch all routers
+	// Fetch all routers (they already have external IPs populated)
 	routers, err := ovnrouter.List(ctx, client)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list routers: %w", err)
@@ -50,40 +50,24 @@ func (r *RouterResource) List(ctx context.Context, client client.Client, names [
 		routers = filtered
 	}
 	
-	// Convert to RouterInfo and fetch external IPs
-	routerInfos := make([]RouterInfo, 0, len(routers))
-	for _, router := range routers {
-		routerInfo := RouterInfo{
-			Router: router,
-		}
-		
-		// Fetch external IPs for this router
-		if externalIPs, err := router.GetExternalIPs(ctx); err == nil {
-			routerInfo.ExternalIPs = externalIPs
-		}
-		// We ignore errors here to not fail the entire listing
-		
-		routerInfos = append(routerInfos, routerInfo)
-	}
-	
 	// Sort routers by UUID for consistent output
-	sort.Slice(routerInfos, func(i, j int) bool {
-		return routerInfos[i].UUID < routerInfos[j].UUID
+	sort.Slice(routers, func(i, j int) bool {
+		return routers[i].UUID < routers[j].UUID
 	})
 	
 	// Return as a RouterList
-	return &RouterList{
+	return &ovnrouter.RouterList{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "RouterList",
 			APIVersion: "atmosphere.vexxhost.com/v1",
 		},
-		Items: routerInfos,
+		Items: routers,
 	}, nil
 }
 
 // GetTable converts a runtime.Object list to a table representation
 func (r *RouterResource) GetTable(obj runtime.Object) (*metav1.Table, error) {
-	routerList, ok := obj.(*RouterList)
+	routerList, ok := obj.(*ovnrouter.RouterList)
 	if !ok {
 		return nil, fmt.Errorf("expected RouterList, got %T", obj)
 	}
@@ -101,34 +85,34 @@ func (r *RouterResource) GetTable(obj runtime.Object) (*metav1.Table, error) {
 	
 	// Build rows
 	rows := []metav1.TableRow{}
-	for _, routerInfo := range routers {
+	for _, router := range routers {
 		// Get router name from ExternalIDs
 		routerName := "<none>"
-		if routerInfo.ExternalIDs != nil {
-			if name, ok := routerInfo.ExternalIDs["neutron:router_name"]; ok {
+		if router.ExternalIDs != nil {
+			if name, ok := router.ExternalIDs["neutron:router_name"]; ok {
 				routerName = name
 			}
 		}
 		
-		// Format external IPs
+		// Format external IPs (already populated in the Router object)
 		externalIPs := "<none>"
-		if len(routerInfo.ExternalIPs) > 0 {
-			externalIPs = strings.Join(routerInfo.ExternalIPs, ",")
+		if len(router.ExternalIPs) > 0 {
+			externalIPs = strings.Join(router.ExternalIPs, ",")
 		}
 		
 		// Get enabled status
 		enabled := "true"
-		if routerInfo.Enabled != nil && !*routerInfo.Enabled {
+		if router.Enabled != nil && !*router.Enabled {
 			enabled = "false"
 		}
 		
 		row := metav1.TableRow{
 			Cells: []interface{}{
-				routerInfo.UUID,
+				router.UUID,
 				routerName,
 				externalIPs,
 				enabled,
-				len(routerInfo.Ports),
+				len(router.Ports),
 			},
 		}
 		rows = append(rows, row)

@@ -50,7 +50,7 @@ func NewGetCommand(configFlags *genericclioptions.ConfigFlags) *cobra.Command {
 	}
 	
 	// Add flags
-	cmd.Flags().StringVarP(&g.outputFormat, "output", "o", "", "Output format. One of: (json, yaml)")
+	cmd.Flags().StringVarP(&g.outputFormat, "output", "o", "", "Output format. One of: (json, yaml, wide)")
 	cmd.Flags().BoolVar(&g.noHeaders, "no-headers", false, "When using the default output format, don't print headers")
 	
 	// OVN configuration flags
@@ -162,8 +162,23 @@ func (g *GetCmd) run(cmd *cobra.Command, args []string) error {
 	case "json", "yaml":
 		// Print as JSON/YAML
 		return g.printObject(data, streams.Out, g.outputFormat)
+	case "wide":
+		// Get the wide table representation
+		if tableResource, ok := resource.(interface{ GetWideTable(runtime.Object) (*metav1.Table, error) }); ok {
+			table, err := tableResource.GetWideTable(data)
+			if err != nil {
+				return err
+			}
+			return g.printTable(table, streams.Out)
+		}
+		// Fallback to regular table if no wide implementation
+		table, err := resource.GetTable(data)
+		if err != nil {
+			return err
+		}
+		return g.printTable(table, streams.Out)
 	default:
-		// Get the table representation
+		// Get the regular table representation
 		table, err := resource.GetTable(data)
 		if err != nil {
 			return err

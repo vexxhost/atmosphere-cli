@@ -65,7 +65,7 @@ func (r *RouterResource) List(ctx context.Context, client client.Client, names [
 	}, nil
 }
 
-// GetTable converts a runtime.Object list to a table representation
+// GetTable converts a runtime.Object list to a table representation (standard view)
 func (r *RouterResource) GetTable(obj runtime.Object) (*metav1.Table, error) {
 	routerList, ok := obj.(*ovnrouter.RouterList)
 	if !ok {
@@ -74,10 +74,73 @@ func (r *RouterResource) GetTable(obj runtime.Object) (*metav1.Table, error) {
 	
 	routers := routerList.Items
 	
-	// Define columns
+	// Define columns for standard view
 	columns := []metav1.TableColumnDefinition{
 		{Name: "UUID", Type: "string", Description: "Router UUID"},
 		{Name: "NAME", Type: "string", Description: "Router name from Neutron"},
+		{Name: "AGENT", Type: "string", Description: "Current hosting agent"},
+		{Name: "EXTERNAL-IPS", Type: "string", Description: "External IP addresses (IPv4 and IPv6)"},
+	}
+	
+	// Build rows
+	rows := []metav1.TableRow{}
+	for _, router := range routers {
+		// Get router name from ExternalIDs
+		routerName := "<none>"
+		if router.ExternalIDs != nil {
+			if name, ok := router.ExternalIDs["neutron:router_name"]; ok {
+				routerName = name
+			}
+		}
+		
+		// Get hosting agent
+		agent := router.HostingAgentName
+		if agent == "" {
+			agent = "<none>"
+		}
+		
+		// Format external IPs (already populated in the Router object)
+		externalIPs := "<none>"
+		if len(router.ExternalIPs) > 0 {
+			externalIPs = strings.Join(router.ExternalIPs, ",")
+		}
+		
+		row := metav1.TableRow{
+			Cells: []interface{}{
+				router.UUID,
+				routerName,
+				agent,
+				externalIPs,
+			},
+		}
+		rows = append(rows, row)
+	}
+	
+	// Create and return table
+	return &metav1.Table{
+		TypeMeta: metav1.TypeMeta{
+			Kind:       "Table",
+			APIVersion: "meta.k8s.io/v1",
+		},
+		ColumnDefinitions: columns,
+		Rows:              rows,
+	}, nil
+}
+
+// GetWideTable converts a runtime.Object list to a wide table representation
+func (r *RouterResource) GetWideTable(obj runtime.Object) (*metav1.Table, error) {
+	routerList, ok := obj.(*ovnrouter.RouterList)
+	if !ok {
+		return nil, fmt.Errorf("expected RouterList, got %T", obj)
+	}
+	
+	routers := routerList.Items
+	
+	// Define columns for wide view (includes all fields)
+	columns := []metav1.TableColumnDefinition{
+		{Name: "UUID", Type: "string", Description: "Router UUID"},
+		{Name: "NAME", Type: "string", Description: "Router name from Neutron"},
+		{Name: "AGENT", Type: "string", Description: "Current hosting agent"},
 		{Name: "EXTERNAL-IPS", Type: "string", Description: "External IP addresses (IPv4 and IPv6)"},
 		{Name: "ENABLED", Type: "string", Description: "Router enabled status"},
 		{Name: "PORTS", Type: "integer", Description: "Number of ports"},
@@ -94,7 +157,13 @@ func (r *RouterResource) GetTable(obj runtime.Object) (*metav1.Table, error) {
 			}
 		}
 		
-		// Format external IPs (already populated in the Router object)
+		// Get hosting agent
+		agent := router.HostingAgentName
+		if agent == "" {
+			agent = "<none>"
+		}
+		
+		// Format external IPs
 		externalIPs := "<none>"
 		if len(router.ExternalIPs) > 0 {
 			externalIPs = strings.Join(router.ExternalIPs, ",")
@@ -110,6 +179,7 @@ func (r *RouterResource) GetTable(obj runtime.Object) (*metav1.Table, error) {
 			Cells: []interface{}{
 				router.UUID,
 				routerName,
+				agent,
 				externalIPs,
 				enabled,
 				len(router.Ports),

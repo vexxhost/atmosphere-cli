@@ -24,8 +24,9 @@ type Router struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 	
-	UUID        string   `json:"uuid"`
-	ExternalIPs []string `json:"externalIPs,omitempty"`
+	UUID            string   `json:"uuid"`
+	ExternalIPs     []string `json:"externalIPs,omitempty"`
+	HostingAgentName string   `json:"hostingAgent,omitempty"`
 	
 	// Embedded OVN types (not serialized)
 	client.Client      `json:"-"`
@@ -50,6 +51,7 @@ func (r *Router) DeepCopyObject() runtime.Object {
 		ObjectMeta:    r.ObjectMeta,
 		UUID:          r.UUID,
 		ExternalIPs:   append([]string(nil), r.ExternalIPs...),
+		HostingAgentName: r.HostingAgentName,
 		Client:        r.Client,
 		LogicalRouter: r.LogicalRouter,
 	}
@@ -129,6 +131,12 @@ func List(ctx context.Context, c client.Client) ([]Router, error) {
 		// Fetch external IPs for this router
 		if externalIPs, err := router.GetExternalIPs(ctx); err == nil {
 			router.ExternalIPs = externalIPs
+		}
+		// We ignore errors here to not fail the entire listing
+		
+		// Fetch hosting agent for this router
+		if hostingAgent, err := router.HostingAgent(ctx); err == nil {
+			router.HostingAgentName = hostingAgent
 		}
 		// We ignore errors here to not fail the entire listing
 		

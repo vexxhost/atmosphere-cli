@@ -26,6 +26,7 @@ func NewRootCommand() *cobra.Command {
 
 	configFlags.AddFlags(rootCmd.PersistentFlags())
 
+	rootCmd.AddCommand(NewGetCommand(configFlags))
 	rootCmd.AddCommand(newOVNNbctlCmd(configFlags))
 	rootCmd.AddCommand(newOVNSbctlCmd(configFlags))
 

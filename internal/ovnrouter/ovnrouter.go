@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ovn-kubernetes/libovsdb/client"
-	"github.com/ovn-kubernetes/libovsdb/model"
-	"github.com/ovn-kubernetes/libovsdb/ovsdb"
+	"github.com/ovn-org/libovsdb/client"
+	"github.com/ovn-org/libovsdb/model"
+	"github.com/ovn-org/libovsdb/ovsdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 )
 
@@ -50,6 +50,7 @@ func List(ctx context.Context, client client.Client) ([]Router, error) {
 	for _, r := range routers {
 		result = append(result, Router{
 			UUID:          strings.TrimPrefix(r.Name, "neutron-"),
+			Client:        client,
 			LogicalRouter: r,
 		})
 	}
@@ -70,6 +71,38 @@ func (r *Router) LogicalRouterPorts(ctx context.Context) ([]nbdb.LogicalRouterPo
 	}
 
 	return result, nil
+}
+
+func (r *Router) GetExternalIPs(ctx context.Context) ([]string, error) {
+	lrps := []nbdb.LogicalRouterPort{}
+	err := r.Client.WhereCache(func(lrp *nbdb.LogicalRouterPort) bool {
+		if lrp.ExternalIDs == nil {
+			return false
+		}
+		
+		isExtGW, hasExtGW := lrp.ExternalIDs["neutron:is_ext_gw"]
+		if !hasExtGW || isExtGW != "True" {
+			return false
+		}
+		
+		routerName, hasRouterName := lrp.ExternalIDs["neutron:router_name"]
+		if !hasRouterName || routerName != r.UUID {
+			return false
+		}
+		
+		return true
+	}).List(ctx, &lrps)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to get external gateway ports for router %q: %w", r.UUID, err)
+	}
+	
+	var ips []string
+	for _, lrp := range lrps {
+		ips = append(ips, lrp.Networks...)
+	}
+	
+	return ips, nil
 }
 
 func (r *Router) GatewayChassis(ctx context.Context) ([]nbdb.GatewayChassis, error) {

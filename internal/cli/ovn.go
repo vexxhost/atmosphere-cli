@@ -14,60 +14,95 @@ import (
 	"k8s.io/client-go/tools/remotecommand"
 )
 
-const (
-	ovnNamespace = "openstack"
-	ovnNBSts     = "ovn-ovsdb-nb"
-	ovnSBSts     = "ovn-ovsdb-sb"
-)
+// OVN command options
+type ovnCmdOptions struct {
+	namespace     string
+	endpoints     []string
+	nbStatefulSet string
+	sbStatefulSet string
+	nbPort        string
+	sbPort        string
+}
+
+// defaultOVNOptions returns default OVN options
+func defaultOVNOptions() *ovnCmdOptions {
+	return &ovnCmdOptions{
+		namespace:     "openstack",
+		nbStatefulSet: "ovn-ovsdb-nb",
+		sbStatefulSet: "ovn-ovsdb-sb",
+		nbPort:        "6641",
+		sbPort:        "6642",
+	}
+}
 
 // newOVNNbctlCmd creates the ovn-nbctl subcommand
 func newOVNNbctlCmd(configFlags *genericclioptions.ConfigFlags) *cobra.Command {
+	opts := defaultOVNOptions()
+	
 	cmd := &cobra.Command{
 		Use:                "ovn-nbctl [args...]",
 		Short:              "Execute ovn-nbctl commands on the OVN northbound database",
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runOVNCommand(configFlags, "nb", args)
+			return runOVNCommand(configFlags, "nb", args, opts)
 		},
 	}
+	
+	// Add flags for OVN configuration
+	cmd.Flags().StringVar(&opts.namespace, "ovn-namespace", opts.namespace, "Namespace where OVN is deployed")
+	cmd.Flags().StringSliceVar(&opts.endpoints, "ovn-endpoints", nil, "OVN database endpoints (default: auto-generated)")
+	
 	return cmd
 }
 
 // newOVNSbctlCmd creates the ovn-sbctl subcommand
 func newOVNSbctlCmd(configFlags *genericclioptions.ConfigFlags) *cobra.Command {
+	opts := defaultOVNOptions()
+	
 	cmd := &cobra.Command{
 		Use:                "ovn-sbctl [args...]",
 		Short:              "Execute ovn-sbctl commands on the OVN southbound database",
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runOVNCommand(configFlags, "sb", args)
+			return runOVNCommand(configFlags, "sb", args, opts)
 		},
 	}
+	
+	// Add flags for OVN configuration
+	cmd.Flags().StringVar(&opts.namespace, "ovn-namespace", opts.namespace, "Namespace where OVN is deployed")
+	cmd.Flags().StringSliceVar(&opts.endpoints, "ovn-endpoints", nil, "OVN database endpoints (default: auto-generated)")
+	
 	return cmd
 }
 
 // runOVNCommand executes the OVN command via Kubernetes API
-func runOVNCommand(configFlags *genericclioptions.ConfigFlags, dbType string, args []string) error {
+func runOVNCommand(configFlags *genericclioptions.ConfigFlags, dbType string, args []string, opts *ovnCmdOptions) error {
 	var stsName, cmdName, dbPort string
 
 	switch dbType {
 	case "nb":
-		stsName = ovnNBSts
+		stsName = opts.nbStatefulSet
 		cmdName = "ovn-nbctl"
-		dbPort = "6641"
+		dbPort = opts.nbPort
 	case "sb":
-		stsName = ovnSBSts
+		stsName = opts.sbStatefulSet
 		cmdName = "ovn-sbctl"
-		dbPort = "6642"
+		dbPort = opts.sbPort
 	default:
 		return fmt.Errorf("invalid database type: %s", dbType)
 	}
 
 	// Build the database connection string
-	dbConnections := []string{
-		fmt.Sprintf("tcp:%s-0.%s.%s.svc.cluster.local:%s", stsName, stsName, ovnNamespace, dbPort),
-		fmt.Sprintf("tcp:%s-1.%s.%s.svc.cluster.local:%s", stsName, stsName, ovnNamespace, dbPort),
-		fmt.Sprintf("tcp:%s-2.%s.%s.svc.cluster.local:%s", stsName, stsName, ovnNamespace, dbPort),
+	var dbConnections []string
+	if len(opts.endpoints) > 0 {
+		dbConnections = opts.endpoints
+	} else {
+		// Generate default endpoints
+		dbConnections = []string{
+			fmt.Sprintf("tcp:%s-0.%s.%s.svc.cluster.local:%s", stsName, stsName, opts.namespace, dbPort),
+			fmt.Sprintf("tcp:%s-1.%s.%s.svc.cluster.local:%s", stsName, stsName, opts.namespace, dbPort),
+			fmt.Sprintf("tcp:%s-2.%s.%s.svc.cluster.local:%s", stsName, stsName, opts.namespace, dbPort),
+		}
 	}
 	dbString := strings.Join(dbConnections, ",")
 
@@ -96,7 +131,7 @@ func runOVNCommand(configFlags *genericclioptions.ConfigFlags, dbType string, ar
 	req := clientset.CoreV1().RESTClient().Post().
 		Resource("pods").
 		Name(podName).
-		Namespace(ovnNamespace).
+		Namespace(opts.namespace).
 		SubResource("exec").
 		VersionedParams(&corev1.PodExecOptions{
 			Command: command,

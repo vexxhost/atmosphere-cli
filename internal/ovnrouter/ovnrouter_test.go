@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ovn-kubernetes/libovsdb/cache"
-	"github.com/ovn-kubernetes/libovsdb/client"
-	"github.com/ovn-kubernetes/libovsdb/model"
+	"github.com/ovn-org/libovsdb/cache"
+	"github.com/ovn-org/libovsdb/client"
+	"github.com/ovn-org/libovsdb/model"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/stretchr/testify/assert"

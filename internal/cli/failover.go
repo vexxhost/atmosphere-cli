@@ -9,6 +9,7 @@ import (
 	"github.com/ovn-org/libovsdb/client"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/spf13/cobra"
+	apiv1alpha1 "github.com/vexxhost/atmosphere/apis/v1alpha1"
 	"github.com/vexxhost/atmosphere/internal/cli/resources"
 	"github.com/vexxhost/atmosphere/internal/ovnrouter"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
@@ -113,14 +114,15 @@ func (f *FailoverCmd) run(cmd *cobra.Command, args []string) error {
 	defer ovnClient.Close()
 	
 	// Get routers to failover
-	var routers []ovnrouter.Router
+	var routers []apiv1alpha1.Router
 	
 	if f.all {
 		// Get all routers
-		routers, err = ovnrouter.List(ctx, ovnClient)
+		routerList, err := ovnrouter.List(ctx, ovnClient)
 		if err != nil {
 			return fmt.Errorf("failed to list routers: %w", err)
 		}
+		routers = routerList.Items
 		fmt.Printf("Found %d routers to failover\n", len(routers))
 	} else {
 		// Get specific routers by UUID
@@ -130,9 +132,9 @@ func (f *FailoverCmd) run(cmd *cobra.Command, args []string) error {
 		}
 		
 		// Create a map for quick lookup
-		routerMap := make(map[string]ovnrouter.Router)
-		for _, r := range allRouters {
-			routerMap[r.UUID] = r
+		routerMap := make(map[string]apiv1alpha1.Router)
+		for _, r := range allRouters.Items {
+			routerMap[string(r.UID)] = r
 		}
 		
 		// Find requested routers
@@ -156,18 +158,16 @@ func (f *FailoverCmd) run(cmd *cobra.Command, args []string) error {
 	
 	for _, router := range routers {
 		// Get router name for display
-		routerName := router.UUID
-		if router.ExternalIDs != nil {
-			if name, ok := router.ExternalIDs["neutron:router_name"]; ok && name != "" {
-				routerName = fmt.Sprintf("%s (%s)", name, router.UUID)
-			}
+		routerName := router.Name
+		if router.Name != string(router.UID) {
+			routerName = fmt.Sprintf("%s (%s)", router.Name, router.UID)
 		}
 		
 		fmt.Printf("Triggering failover for router %s... ", routerName)
 		
 		// Create a context with timeout for this specific failover
 		failoverCtx, cancel := context.WithTimeout(ctx, f.timeout)
-		err := router.Failover(failoverCtx)
+		err := ovnrouter.Failover(failoverCtx, ovnClient, &router)
 		cancel()
 		
 		if err != nil {

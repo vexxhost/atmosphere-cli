@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/ovn-org/libovsdb/client"
+	apiv1alpha1 "github.com/vexxhost/atmosphere/apis/v1alpha1"
 	"github.com/vexxhost/atmosphere/internal/ovnrouter"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -28,46 +29,39 @@ func (r *RouterResource) Aliases() []string {
 // List fetches routers and returns them as a runtime.Object
 func (r *RouterResource) List(ctx context.Context, client client.Client, names []string) (runtime.Object, error) {
 	// Fetch all routers (they already have external IPs populated)
-	routers, err := ovnrouter.List(ctx, client)
+	routerList, err := ovnrouter.List(ctx, client)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list routers: %w", err)
 	}
 	
 	// Filter by UUID if specified
 	if len(names) > 0 {
-		filtered := []ovnrouter.Router{}
+		filtered := []apiv1alpha1.Router{}
 		uuidSet := make(map[string]bool)
 		for _, uuid := range names {
 			uuidSet[uuid] = true
 		}
 		
-		for _, router := range routers {
+		for _, router := range routerList.Items {
 			// Check UUID only
-			if uuidSet[router.UUID] {
+			if uuidSet[string(router.UID)] {
 				filtered = append(filtered, router)
 			}
 		}
-		routers = filtered
+		routerList.Items = filtered
 	}
 	
 	// Sort routers by UUID for consistent output
-	sort.Slice(routers, func(i, j int) bool {
-		return routers[i].UUID < routers[j].UUID
+	sort.Slice(routerList.Items, func(i, j int) bool {
+		return string(routerList.Items[i].UID) < string(routerList.Items[j].UID)
 	})
 	
-	// Return as a RouterList
-	return &ovnrouter.RouterList{
-		TypeMeta: metav1.TypeMeta{
-			Kind:       "RouterList",
-			APIVersion: "atmosphere.vexxhost.com/v1",
-		},
-		Items: routers,
-	}, nil
+	return routerList, nil
 }
 
 // GetTable converts a runtime.Object list to a table representation (standard view)
 func (r *RouterResource) GetTable(obj runtime.Object) (*metav1.Table, error) {
-	routerList, ok := obj.(*ovnrouter.RouterList)
+	routerList, ok := obj.(*apiv1alpha1.RouterList)
 	if !ok {
 		return nil, fmt.Errorf("expected RouterList, got %T", obj)
 	}
@@ -85,29 +79,24 @@ func (r *RouterResource) GetTable(obj runtime.Object) (*metav1.Table, error) {
 	// Build rows
 	rows := []metav1.TableRow{}
 	for _, router := range routers {
-		// Get router name from ExternalIDs
-		routerName := "<none>"
-		if router.ExternalIDs != nil {
-			if name, ok := router.ExternalIDs["neutron:router_name"]; ok {
-				routerName = name
-			}
-		}
+		// Use the Name from ObjectMeta
+		routerName := router.Name
 		
 		// Get hosting agent
-		agent := router.HostingAgentName
+		agent := router.Status.Agent
 		if agent == "" {
 			agent = "<none>"
 		}
 		
 		// Format external IPs (already populated in the Router object)
 		externalIPs := "<none>"
-		if len(router.ExternalIPs) > 0 {
-			externalIPs = strings.Join(router.ExternalIPs, ",")
+		if len(router.Status.ExternalIPs) > 0 {
+			externalIPs = strings.Join(router.Status.ExternalIPs, ",")
 		}
 		
 		row := metav1.TableRow{
 			Cells: []interface{}{
-				router.UUID,
+				string(router.UID),
 				routerName,
 				agent,
 				externalIPs,
@@ -129,7 +118,7 @@ func (r *RouterResource) GetTable(obj runtime.Object) (*metav1.Table, error) {
 
 // GetWideTable converts a runtime.Object list to a wide table representation
 func (r *RouterResource) GetWideTable(obj runtime.Object) (*metav1.Table, error) {
-	routerList, ok := obj.(*ovnrouter.RouterList)
+	routerList, ok := obj.(*apiv1alpha1.RouterList)
 	if !ok {
 		return nil, fmt.Errorf("expected RouterList, got %T", obj)
 	}
@@ -149,40 +138,33 @@ func (r *RouterResource) GetWideTable(obj runtime.Object) (*metav1.Table, error)
 	// Build rows
 	rows := []metav1.TableRow{}
 	for _, router := range routers {
-		// Get router name from ExternalIDs
-		routerName := "<none>"
-		if router.ExternalIDs != nil {
-			if name, ok := router.ExternalIDs["neutron:router_name"]; ok {
-				routerName = name
-			}
-		}
+		// Use the Name from ObjectMeta
+		routerName := router.Name
 		
 		// Get hosting agent
-		agent := router.HostingAgentName
+		agent := router.Status.Agent
 		if agent == "" {
 			agent = "<none>"
 		}
 		
 		// Format external IPs
 		externalIPs := "<none>"
-		if len(router.ExternalIPs) > 0 {
-			externalIPs = strings.Join(router.ExternalIPs, ",")
+		if len(router.Status.ExternalIPs) > 0 {
+			externalIPs = strings.Join(router.Status.ExternalIPs, ",")
 		}
 		
-		// Get enabled status
-		enabled := "true"
-		if router.Enabled != nil && !*router.Enabled {
-			enabled = "false"
-		}
+		// For wide view, we'll simplify for now - no enabled/ports info
+		enabled := "N/A"
+		ports := 0
 		
 		row := metav1.TableRow{
 			Cells: []interface{}{
-				router.UUID,
+				string(router.UID),
 				routerName,
 				agent,
 				externalIPs,
 				enabled,
-				len(router.Ports),
+				ports,
 			},
 		}
 		rows = append(rows, row)

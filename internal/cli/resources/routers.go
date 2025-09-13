@@ -31,7 +31,7 @@ func (r *RouterResource) Aliases() []string {
 func (r *RouterResource) List(ctx context.Context, client client.Client, names []string) (runtime.Object, error) {
 	// Create router manager
 	routerManager := ovnrouter.NewManager(client)
-	
+
 	// Fetch all routers (they already have external IPs populated)
 	routerList, err := routerManager.List(ctx)
 	if err != nil {

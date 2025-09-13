@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ovn-org/libovsdb/client"
+	"github.com/ovn-org/libovsdb/model"
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	"github.com/spf13/cobra"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
@@ -194,7 +195,11 @@ func (f *FailoverCmd) run(cmd *cobra.Command, args []string) error {
 // connectToOVN establishes connection to OVN database
 func (f *FailoverCmd) connectToOVN(ctx context.Context) (client.Client, error) {
 	// Get database model
-	dbModel, err := nbdb.FullDatabaseModel()
+	dbModel, err := model.NewClientDBModel("OVN_Northbound", map[string]model.Model{
+		nbdb.GatewayChassisTable:    &nbdb.GatewayChassis{},
+		nbdb.LogicalRouterTable:     &nbdb.LogicalRouter{},
+		nbdb.LogicalRouterPortTable: &nbdb.LogicalRouterPort{},
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to get database model: %w", err)
 	}

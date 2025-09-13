@@ -214,10 +214,10 @@ func TestRouter_LogicalRouterPorts(t *testing.T) {
 			nbClient, cleanup := setupTestHarnessForTest(t, tt.nbData)
 			t.Cleanup(cleanup.Cleanup)
 
-			_, lr, err := GetByName(ctx, nbClient, "neutron-"+testRouterUUID)
+			router, err := GetByUUID(ctx, nbClient, testRouterUUID)
 			require.NoError(t, err)
 
-			ports, err := GetLogicalRouterPorts(ctx, nbClient, lr)
+			ports, err := GetLogicalRouterPorts(ctx, nbClient, router)
 			require.NoError(t, err)
 
 			require.Len(t, ports, len(tt.expected))
@@ -338,10 +338,10 @@ func TestRouter_GatewayChassis(t *testing.T) {
 			nbClient, cleanup := setupTestHarnessForTest(t, tt.nbData)
 			t.Cleanup(cleanup.Cleanup)
 
-			_, lr, err := GetByName(ctx, nbClient, "neutron-"+testRouterUUID)
+			router, err := GetByUUID(ctx, nbClient, testRouterUUID)
 			require.NoError(t, err)
 
-			gcs, err := GetGatewayChassis(ctx, nbClient, lr)
+			gcs, err := GetGatewayChassis(ctx, nbClient, router)
 			require.NoError(t, err)
 
 			require.Len(t, gcs, len(tt.expected))
@@ -455,14 +455,14 @@ func TestRouter_HostingAgent(t *testing.T) {
 			nbClient, cleanup := setupTestHarnessForTest(t, tt.nbData)
 			t.Cleanup(cleanup.Cleanup)
 
-			_, lr, err := GetByName(ctx, nbClient, "neutron-"+testRouterUUID)
+			router, err := GetByUUID(ctx, nbClient, testRouterUUID)
 			require.NoError(t, err)
 
 			// NOTE(mnaser): I hate this, but this gives a chance to the handlers to
 			//               reconcile and update the status field.
 			time.Sleep(10 * time.Millisecond)
 
-			agent, err := GetHostingAgent(ctx, nbClient, lr)
+			agent, err := GetHostingAgent(ctx, nbClient, router)
 
 			if tt.expectError {
 				require.Error(t, err)
@@ -618,7 +618,7 @@ func TestRouter_Failover(t *testing.T) {
 			nbClient, cleanup := setupTestHarnessForTest(t, tt.nbData)
 			t.Cleanup(cleanup.Cleanup)
 
-			router, lr, err := GetByName(ctx, nbClient, "neutron-"+testRouterUUID)
+			router, err := GetByUUID(ctx, nbClient, testRouterUUID)
 			require.NoError(t, err)
 
 			// NOTE(mnaser): I hate this, but this gives a chance to the handlers to
@@ -626,7 +626,7 @@ func TestRouter_Failover(t *testing.T) {
 			time.Sleep(10 * time.Millisecond)
 
 			if tt.expectedInitialAgent != "" {
-				agent, err := GetHostingAgent(ctx, nbClient, lr)
+				agent, err := GetHostingAgent(ctx, nbClient, router)
 				require.NoError(t, err)
 				assert.Equal(t, tt.expectedInitialAgent, agent)
 			}
@@ -642,7 +642,7 @@ func TestRouter_Failover(t *testing.T) {
 				require.NoError(t, err)
 
 				if tt.expectedFailoverAgent != "" {
-					agent, err := GetHostingAgent(ctx, nbClient, lr)
+					agent, err := GetHostingAgent(ctx, nbClient, router)
 					require.NoError(t, err)
 					assert.Equal(t, tt.expectedFailoverAgent, agent)
 				}

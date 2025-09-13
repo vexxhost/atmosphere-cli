@@ -16,26 +16,18 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/nbdb"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 
 	apiv1alpha1 "github.com/vexxhost/atmosphere/apis/v1alpha1"
 )
 
-// GetByName retrieves a router by its name from OVN
-func GetByName(ctx context.Context, c client.Client, name string) (*apiv1alpha1.Router, *nbdb.LogicalRouter, error) {
-	lrs := []nbdb.LogicalRouter{}
-	if err := c.Where(&nbdb.LogicalRouter{Name: name}).List(ctx, &lrs); err != nil {
-		return nil, nil, fmt.Errorf("failed to get logical router %q: %w", name, err)
-	}
+func convertToRouter(ctx context.Context, c client.Client, lr *nbdb.LogicalRouter) (*apiv1alpha1.Router, error) {
+	routerUUID := strings.TrimPrefix(lr.Name, "neutron-")
+	uuid := types.UID(routerUUID)
 
-	if len(lrs) == 0 {
-		return nil, nil, fmt.Errorf("logical router %q not found", name)
-	}
-
-	uuid := strings.TrimPrefix(lrs[0].Name, "neutron-")
-	// Try to get the router name from ExternalIDs, fallback to UUID
-	routerName := uuid
-	if lrs[0].ExternalIDs != nil {
-		if name, ok := lrs[0].ExternalIDs["neutron:router_name"]; ok && name != "" {
+	routerName := string(uuid)
+	if lr.ExternalIDs != nil {
+		if name, ok := lr.ExternalIDs["neutron:router_name"]; ok && name != "" {
 			routerName = name
 		}
 	}
@@ -49,19 +41,43 @@ func GetByName(ctx context.Context, c client.Client, name string) (*apiv1alpha1.
 			Name: routerName,
 			UID:  types.UID(uuid),
 		},
+		Status: apiv1alpha1.RouterStatus{
+			InternalUUID: ptr.To(types.UID(lr.UUID)),
+		},
 	}
 
-	// Fetch external IPs
-	if externalIPs, err := GetExternalIPs(ctx, c, &lrs[0]); err == nil {
-		router.Status.ExternalIPs = externalIPs
+	for _, portUUID := range lr.Ports {
+		lrp := nbdb.LogicalRouterPort{UUID: portUUID}
+		if err := c.Get(ctx, &lrp); err != nil {
+			return nil, fmt.Errorf("failed to get logical router port %q for router %q: %w", portUUID, lr.Name, err)
+		}
+
+		if lrp.ExternalIDs["neutron:is_ext_gw"] == "True" {
+			router.Status.ExternalIPs = append(router.Status.ExternalIPs, lrp.Networks...)
+			router.Status.Agent = lrp.Status["hosting-chassis"]
+		}
+
+		router.Status.Ports = append(router.Status.Ports, apiv1alpha1.RouterPortInfo{
+			UUID:         types.UID(strings.TrimPrefix(lrp.Name, "lrp-")),
+			InternalUUID: ptr.To(types.UID(lrp.UUID)),
+			IsGateway:    lrp.ExternalIDs["neutron:is_ext_gw"] == "True",
+		})
 	}
 
-	// Fetch hosting agent
-	if hostingAgent, err := GetHostingAgent(ctx, c, &lrs[0]); err == nil {
-		router.Status.Agent = hostingAgent
+	return router, nil
+}
+
+func GetByUUID(ctx context.Context, c client.Client, uuid types.UID) (*apiv1alpha1.Router, error) {
+	lrs := []nbdb.LogicalRouter{}
+	if err := c.Where(&nbdb.LogicalRouter{Name: fmt.Sprintf("neutron-%s", uuid)}).List(ctx, &lrs); err != nil {
+		return nil, fmt.Errorf("failed to get router %q: %w", uuid, err)
 	}
 
-	return router, &lrs[0], nil
+	if len(lrs) == 0 {
+		return nil, fmt.Errorf("router %q not found", uuid)
+	}
+
+	return convertToRouter(ctx, c, &lrs[0])
 }
 
 // List retrieves all routers from OVN
@@ -80,50 +96,25 @@ func List(ctx context.Context, c client.Client) (*apiv1alpha1.RouterList, error)
 	}
 
 	for _, lr := range routers {
-		uuid := strings.TrimPrefix(lr.Name, "neutron-")
-		// Try to get the router name from ExternalIDs, fallback to UUID
-		routerName := uuid
-		if lr.ExternalIDs != nil {
-			if name, ok := lr.ExternalIDs["neutron:router_name"]; ok && name != "" {
-				routerName = name
-			}
+		router, err := convertToRouter(ctx, c, &lr)
+		if err != nil {
+			continue
 		}
 
-		router := apiv1alpha1.Router{
-			TypeMeta: metav1.TypeMeta{
-				Kind:       "Router",
-				APIVersion: "atmosphere.vexxhost.com/v1alpha1",
-			},
-			ObjectMeta: metav1.ObjectMeta{
-				Name: routerName,
-				UID:  types.UID(uuid),
-			},
-		}
-
-		// Fetch external IPs for this router
-		if externalIPs, err := GetExternalIPs(ctx, c, &lr); err == nil {
-			router.Status.ExternalIPs = externalIPs
-		}
-
-		// Fetch hosting agent for this router
-		if hostingAgent, err := GetHostingAgent(ctx, c, &lr); err == nil {
-			router.Status.Agent = hostingAgent
-		}
-
-		result.Items = append(result.Items, router)
+		result.Items = append(result.Items, *router)
 	}
 
 	return result, nil
 }
 
 // GetLogicalRouterPorts retrieves all logical router ports for a given router
-func GetLogicalRouterPorts(ctx context.Context, c client.Client, lr *nbdb.LogicalRouter) ([]nbdb.LogicalRouterPort, error) {
-	result := make([]nbdb.LogicalRouterPort, 0, len(lr.Ports))
+func GetLogicalRouterPorts(ctx context.Context, c client.Client, router *apiv1alpha1.Router) ([]nbdb.LogicalRouterPort, error) {
+	result := make([]nbdb.LogicalRouterPort, 0, len(router.Status.Ports))
 
-	for _, portUUID := range lr.Ports {
-		lrp := nbdb.LogicalRouterPort{UUID: portUUID}
+	for _, port := range router.Status.Ports {
+		lrp := nbdb.LogicalRouterPort{UUID: string(*port.InternalUUID)}
 		if err := c.Get(ctx, &lrp); err != nil {
-			return nil, fmt.Errorf("failed to get logical router port %q for router %q: %w", portUUID, lr.Name, err)
+			return nil, fmt.Errorf("failed to get logical router port %q for router %q: %w", port.UUID, router.UID, err)
 		}
 
 		result = append(result, lrp)
@@ -132,44 +123,9 @@ func GetLogicalRouterPorts(ctx context.Context, c client.Client, lr *nbdb.Logica
 	return result, nil
 }
 
-// GetExternalIPs retrieves the external IP addresses for a router
-func GetExternalIPs(ctx context.Context, c client.Client, lr *nbdb.LogicalRouter) ([]string, error) {
-	routerUUID := strings.TrimPrefix(lr.Name, "neutron-")
-
-	lrps := []nbdb.LogicalRouterPort{}
-	err := c.WhereCache(func(lrp *nbdb.LogicalRouterPort) bool {
-		if lrp.ExternalIDs == nil {
-			return false
-		}
-
-		isExtGW, hasExtGW := lrp.ExternalIDs["neutron:is_ext_gw"]
-		if !hasExtGW || isExtGW != "True" {
-			return false
-		}
-
-		routerName, hasRouterName := lrp.ExternalIDs["neutron:router_name"]
-		if !hasRouterName || routerName != routerUUID {
-			return false
-		}
-
-		return true
-	}).List(ctx, &lrps)
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to get external gateway ports for router %q: %w", routerUUID, err)
-	}
-
-	var ips []string
-	for _, lrp := range lrps {
-		ips = append(ips, lrp.Networks...)
-	}
-
-	return ips, nil
-}
-
 // GetGatewayChassis retrieves all gateway chassis for a router
-func GetGatewayChassis(ctx context.Context, c client.Client, lr *nbdb.LogicalRouter) ([]nbdb.GatewayChassis, error) {
-	lrps, err := GetLogicalRouterPorts(ctx, c, lr)
+func GetGatewayChassis(ctx context.Context, c client.Client, router *apiv1alpha1.Router) ([]nbdb.GatewayChassis, error) {
+	lrps, err := GetLogicalRouterPorts(ctx, c, router)
 	if err != nil {
 		return nil, err
 	}
@@ -191,14 +147,14 @@ func GetGatewayChassis(ctx context.Context, c client.Client, lr *nbdb.LogicalRou
 }
 
 // GetHostingAgent retrieves the name of the agent hosting the router
-func GetHostingAgent(ctx context.Context, c client.Client, lr *nbdb.LogicalRouter) (string, error) {
-	lrps, err := GetLogicalRouterPorts(ctx, c, lr)
+func GetHostingAgent(ctx context.Context, c client.Client, router *apiv1alpha1.Router) (string, error) {
+	lrps, err := GetLogicalRouterPorts(ctx, c, router)
 	if err != nil {
 		return "", err
 	}
 
 	if len(lrps) == 0 {
-		return "", fmt.Errorf("no logical router ports found for router %q", lr.Name)
+		return "", fmt.Errorf("no logical router ports found for router %q", router.Name)
 	}
 
 	var agent string
@@ -217,12 +173,12 @@ func GetHostingAgent(ctx context.Context, c client.Client, lr *nbdb.LogicalRoute
 		if agent == "" {
 			agent = agentChassis
 		} else if agent != agentChassis {
-			return "", fmt.Errorf("logical router ports for router %q are hosted on multiple agents: %q and %q", lr.Name, agent, agentChassis)
+			return "", fmt.Errorf("logical router ports for router %q are hosted on multiple agents: %q and %q", router.UID, agent, agentChassis)
 		}
 	}
 
 	if agent == "" {
-		return "", fmt.Errorf("no hosting-chassis found for any logical router port of router %q", lr.Name)
+		return "", fmt.Errorf("no hosting-chassis found for any logical router port of router %q", router.UID)
 	}
 
 	return agent, nil
@@ -258,19 +214,7 @@ func GetHostingAgent(ctx context.Context, c client.Client, lr *nbdb.LogicalRoute
 // The function requires at least 2 gateway chassis to perform a failover.
 // Returns an error if no gateway chassis are found or if only one exists.
 func Failover(ctx context.Context, c client.Client, router *apiv1alpha1.Router) error {
-	// Get the OVN logical router using the UID
-	lrs := []nbdb.LogicalRouter{}
-	if err := c.Where(&nbdb.LogicalRouter{Name: "neutron-" + string(router.UID)}).List(ctx, &lrs); err != nil {
-		return fmt.Errorf("failed to get logical router %q: %w", router.UID, err)
-	}
-
-	if len(lrs) == 0 {
-		return fmt.Errorf("logical router %q not found", router.UID)
-	}
-
-	lr := &lrs[0]
-
-	gcs, err := GetGatewayChassis(ctx, c, lr)
+	gcs, err := GetGatewayChassis(ctx, c, router)
 	if err != nil {
 		return err
 	}
@@ -339,7 +283,7 @@ func Failover(ctx context.Context, c client.Client, router *apiv1alpha1.Router) 
 		case <-ctx.Done():
 			return fmt.Errorf("failed waiting for router %q to failover to %q: %w", router.UID, expectedHost, ctx.Err())
 		case <-ticker.C:
-			currentHost, err := GetHostingAgent(ctx, c, lr)
+			currentHost, err := GetHostingAgent(ctx, c, router)
 			if err != nil {
 				continue
 			}

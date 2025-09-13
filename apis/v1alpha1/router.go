@@ -5,15 +5,34 @@ package v1alpha1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 )
+
+// RouterPortInfo defines information about a router port
+type RouterPortInfo struct {
+	// UUID is the UUID of the logical router port
+	UUID types.UID `json:"uuid,omitempty"`
+
+	// InternalUUID is the UUID of the internal port (if any)
+	InternalUUID *types.UID `json:"internalUUID,omitempty"`
+
+	// IsGateway indicates if this port is a gateway port
+	IsGateway bool `json:"isGateway,omitempty"`
+}
 
 // RouterStatus defines the observed state of Router
 type RouterStatus struct {
+	// Agent is the UUID of the agent hosting this router
+	Agent string `json:"agent,omitempty"`
+
 	// ExternalIPs is the list of external IP addresses for the router
 	ExternalIPs []string `json:"externalIPs,omitempty"`
 
-	// Agent is the UUID of the agent hosting this router
-	Agent string `json:"agent,omitempty"`
+	// InternalUUID is the internal UUID of the router (if any)
+	InternalUUID *types.UID `json:"internalUUID,omitempty"`
+
+	// Ports is the list of port UUIDs associated with this router
+	Ports []RouterPortInfo `json:"ports,omitempty"`
 }
 
 // +kubebuilder:object:root=true

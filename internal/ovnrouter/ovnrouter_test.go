@@ -161,74 +161,6 @@ func TestList(t *testing.T) {
 	}
 }
 
-func TestRouter_LogicalRouterPorts(t *testing.T) {
-	tests := []struct {
-		name     string
-		nbData   []libovsdb.TestData
-		expected []string
-	}{
-		{
-			name: "basic",
-			nbData: []libovsdb.TestData{
-				&nbdb.LogicalRouter{
-					Name:  "neutron-" + testRouterUUID,
-					Ports: []string{testPortUUID1, testPortUUID2},
-				},
-				&nbdb.LogicalRouterPort{UUID: testPortUUID1, Name: "lrp-1"},
-				&nbdb.LogicalRouterPort{UUID: testPortUUID2, Name: "lrp-2"},
-			},
-			expected: []string{testPortUUID1, testPortUUID2},
-		},
-		{
-			name: "no ports",
-			nbData: []libovsdb.TestData{
-				&nbdb.LogicalRouter{
-					Name:  "neutron-" + testRouterUUID,
-					Ports: []string{},
-				},
-			},
-			expected: []string{},
-		},
-		{
-			name: "multiple routers",
-			nbData: []libovsdb.TestData{
-				&nbdb.LogicalRouter{
-					Name:  "neutron-" + testRouterUUID,
-					Ports: []string{testPortUUID1},
-				},
-				&nbdb.LogicalRouter{
-					Name:  "neutron-" + testRouterUUID2,
-					Ports: []string{testPortUUID2},
-				},
-				&nbdb.LogicalRouterPort{UUID: testPortUUID1, Name: "lrp-1"},
-				&nbdb.LogicalRouterPort{UUID: testPortUUID2, Name: "lrp-2"},
-			},
-			expected: []string{testPortUUID1},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer cancel()
-
-			nbClient, cleanup := setupTestHarnessForTest(t, tt.nbData)
-			t.Cleanup(cleanup.Cleanup)
-
-			manager := NewManager(nbClient)
-			router, err := manager.GetByUUID(ctx, testRouterUUID)
-			require.NoError(t, err)
-
-			ports, err := manager.GetLogicalRouterPorts(ctx, router)
-			require.NoError(t, err)
-
-			require.Len(t, ports, len(tt.expected))
-			for _, port := range ports {
-				assert.Contains(t, tt.expected, port.UUID)
-			}
-		})
-	}
-}
 func TestRouter_GatewayChassis(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -373,6 +305,7 @@ func TestRouter_HostingAgent(t *testing.T) {
 				&nbdb.LogicalRouterPort{
 					UUID:           testPortUUID1,
 					Name:           "lrp-1",
+					ExternalIDs:    map[string]string{"neutron:is_ext_gw": "True"},
 					GatewayChassis: []string{testChassisUUID},
 				},
 				&nbdb.LogicalRouterPort{
@@ -399,6 +332,7 @@ func TestRouter_HostingAgent(t *testing.T) {
 				&nbdb.LogicalRouterPort{
 					UUID:           testPortUUID1,
 					Name:           "lrp-1",
+					ExternalIDs:    map[string]string{"neutron:is_ext_gw": "True"},
 					GatewayChassis: []string{testChassisUUID, testChassisUUID2},
 				},
 				&nbdb.LogicalRouterPort{
@@ -430,7 +364,7 @@ func TestRouter_HostingAgent(t *testing.T) {
 				},
 			},
 			expectError:   true,
-			errorContains: "no logical router ports found",
+			errorContains: "no hosting-chassis found",
 		},
 		{
 			name: "port missing hosting-chassis status",
@@ -522,6 +456,7 @@ func TestRouter_Failover(t *testing.T) {
 				&nbdb.LogicalRouterPort{
 					UUID:           testPortUUID1,
 					Name:           "lrp-1",
+					ExternalIDs:    map[string]string{"neutron:is_ext_gw": "True"},
 					GatewayChassis: []string{testChassisUUID},
 				},
 				&nbdb.LogicalRouterPort{
@@ -550,6 +485,7 @@ func TestRouter_Failover(t *testing.T) {
 				&nbdb.LogicalRouterPort{
 					UUID:           testPortUUID1,
 					Name:           "lrp-1",
+					ExternalIDs:    map[string]string{"neutron:is_ext_gw": "True"},
 					GatewayChassis: []string{testChassisUUID, testChassisUUID2},
 				},
 				&nbdb.LogicalRouterPort{
@@ -583,6 +519,7 @@ func TestRouter_Failover(t *testing.T) {
 				&nbdb.LogicalRouterPort{
 					UUID:           testPortUUID1,
 					Name:           "lrp-1",
+					ExternalIDs:    map[string]string{"neutron:is_ext_gw": "True"},
 					GatewayChassis: []string{testChassisUUID, testChassisUUID2, testChassisUUID3},
 				},
 				&nbdb.LogicalRouterPort{

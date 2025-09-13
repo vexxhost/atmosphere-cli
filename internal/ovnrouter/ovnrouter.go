@@ -120,9 +120,9 @@ func (m *Manager) List(ctx context.Context) (*apiv1alpha1.RouterList, error) {
 	return result, nil
 }
 
-// GetLogicalRouterPorts retrieves all logical router ports for a given router
-func (m *Manager) GetLogicalRouterPorts(ctx context.Context, router *apiv1alpha1.Router) ([]nbdb.LogicalRouterPort, error) {
-	result := make([]nbdb.LogicalRouterPort, 0, len(router.Status.Ports))
+// GetGatewayChassis retrieves all gateway chassis for a router
+func (m *Manager) GetGatewayChassis(ctx context.Context, router *apiv1alpha1.Router) ([]nbdb.GatewayChassis, error) {
+	result := []nbdb.GatewayChassis{}
 
 	for _, port := range router.Status.Ports {
 		lrp := nbdb.LogicalRouterPort{UUID: string(*port.InternalUUID)}
@@ -130,22 +130,6 @@ func (m *Manager) GetLogicalRouterPorts(ctx context.Context, router *apiv1alpha1
 			return nil, fmt.Errorf("failed to get logical router port %q for router %q: %w", port.UUID, router.UID, err)
 		}
 
-		result = append(result, lrp)
-	}
-
-	return result, nil
-}
-
-// GetGatewayChassis retrieves all gateway chassis for a router
-func (m *Manager) GetGatewayChassis(ctx context.Context, router *apiv1alpha1.Router) ([]nbdb.GatewayChassis, error) {
-	lrps, err := m.GetLogicalRouterPorts(ctx, router)
-	if err != nil {
-		return nil, err
-	}
-
-	result := make([]nbdb.GatewayChassis, 0)
-
-	for _, lrp := range lrps {
 		for _, gcUUID := range lrp.GatewayChassis {
 			gc := nbdb.GatewayChassis{UUID: gcUUID}
 			if err := m.client.Get(ctx, &gc); err != nil {
@@ -161,21 +145,16 @@ func (m *Manager) GetGatewayChassis(ctx context.Context, router *apiv1alpha1.Rou
 
 // GetHostingAgent retrieves the name of the agent hosting the router
 func (m *Manager) GetHostingAgent(ctx context.Context, router *apiv1alpha1.Router) (string, error) {
-	lrps, err := m.GetLogicalRouterPorts(ctx, router)
-	if err != nil {
-		return "", err
-	}
-
-	if len(lrps) == 0 {
-		return "", fmt.Errorf("no logical router ports found for router %q", router.Name)
-	}
-
 	var agent string
 
-	for _, lrp := range lrps {
-		// Skip ports that are not external gateways
-		if len(lrp.GatewayChassis) == 0 {
+	for _, port := range router.Status.Ports {
+		if !port.IsGateway {
 			continue
+		}
+
+		lrp := nbdb.LogicalRouterPort{UUID: string(*port.InternalUUID)}
+		if err := m.client.Get(ctx, &lrp); err != nil {
+			return "", fmt.Errorf("failed to get logical router port %q for router %q: %w", port.UUID, router.UID, err)
 		}
 
 		agentChassis, ok := lrp.Status["hosting-chassis"]

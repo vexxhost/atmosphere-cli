@@ -15,6 +15,7 @@ import (
 	"github.com/ovn-org/ovn-kubernetes/go-controller/pkg/testing/libovsdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 const (
@@ -110,7 +111,7 @@ func TestList(t *testing.T) {
 	tests := []struct {
 		name     string
 		nbData   []libovsdb.TestData
-		expected []string
+		expected []types.UID
 	}{
 		{
 			name: "single router",
@@ -119,7 +120,7 @@ func TestList(t *testing.T) {
 					Name: "neutron-" + testRouterUUID,
 				},
 			},
-			expected: []string{testRouterUUID},
+			expected: []types.UID{testRouterUUID},
 		},
 		{
 			name: "multiple routers",
@@ -131,12 +132,12 @@ func TestList(t *testing.T) {
 					Name: "neutron-" + testRouterUUID2,
 				},
 			},
-			expected: []string{testRouterUUID, testRouterUUID2},
+			expected: []types.UID{testRouterUUID, testRouterUUID2},
 		},
 		{
 			name:     "no routers",
 			nbData:   []libovsdb.TestData{},
-			expected: []string{},
+			expected: []types.UID{},
 		},
 	}
 
@@ -148,12 +149,12 @@ func TestList(t *testing.T) {
 			nbClient, cleanup := setupTestHarnessForTest(t, tt.nbData)
 			t.Cleanup(cleanup.Cleanup)
 
-			routers, err := List(ctx, nbClient)
+			list, err := List(ctx, nbClient)
 			require.NoError(t, err)
 
-			require.Len(t, routers, len(tt.expected))
-			for _, router := range routers {
-				assert.Contains(t, tt.expected, router.UUID)
+			require.Len(t, list.Items, len(tt.expected))
+			for _, router := range list.Items {
+				assert.Contains(t, tt.expected, router.UID)
 			}
 		})
 	}
@@ -213,10 +214,10 @@ func TestRouter_LogicalRouterPorts(t *testing.T) {
 			nbClient, cleanup := setupTestHarnessForTest(t, tt.nbData)
 			t.Cleanup(cleanup.Cleanup)
 
-			router, err := GetByName(ctx, nbClient, "neutron-"+testRouterUUID)
+			_, lr, err := GetByName(ctx, nbClient, "neutron-"+testRouterUUID)
 			require.NoError(t, err)
 
-			ports, err := router.LogicalRouterPorts(ctx)
+			ports, err := GetLogicalRouterPorts(ctx, nbClient, lr)
 			require.NoError(t, err)
 
 			require.Len(t, ports, len(tt.expected))
@@ -337,10 +338,10 @@ func TestRouter_GatewayChassis(t *testing.T) {
 			nbClient, cleanup := setupTestHarnessForTest(t, tt.nbData)
 			t.Cleanup(cleanup.Cleanup)
 
-			router, err := GetByName(ctx, nbClient, "neutron-"+testRouterUUID)
+			_, lr, err := GetByName(ctx, nbClient, "neutron-"+testRouterUUID)
 			require.NoError(t, err)
 
-			gcs, err := router.GatewayChassis(ctx)
+			gcs, err := GetGatewayChassis(ctx, nbClient, lr)
 			require.NoError(t, err)
 
 			require.Len(t, gcs, len(tt.expected))
@@ -454,14 +455,14 @@ func TestRouter_HostingAgent(t *testing.T) {
 			nbClient, cleanup := setupTestHarnessForTest(t, tt.nbData)
 			t.Cleanup(cleanup.Cleanup)
 
-			router, err := GetByName(ctx, nbClient, "neutron-"+testRouterUUID)
+			_, lr, err := GetByName(ctx, nbClient, "neutron-"+testRouterUUID)
 			require.NoError(t, err)
 
 			// NOTE(mnaser): I hate this, but this gives a chance to the handlers to
 			//               reconcile and update the status field.
 			time.Sleep(10 * time.Millisecond)
 
-			agent, err := router.HostingAgent(ctx)
+			agent, err := GetHostingAgent(ctx, nbClient, lr)
 
 			if tt.expectError {
 				require.Error(t, err)
@@ -617,7 +618,7 @@ func TestRouter_Failover(t *testing.T) {
 			nbClient, cleanup := setupTestHarnessForTest(t, tt.nbData)
 			t.Cleanup(cleanup.Cleanup)
 
-			router, err := GetByName(ctx, nbClient, "neutron-"+testRouterUUID)
+			router, lr, err := GetByName(ctx, nbClient, "neutron-"+testRouterUUID)
 			require.NoError(t, err)
 
 			// NOTE(mnaser): I hate this, but this gives a chance to the handlers to
@@ -625,12 +626,12 @@ func TestRouter_Failover(t *testing.T) {
 			time.Sleep(10 * time.Millisecond)
 
 			if tt.expectedInitialAgent != "" {
-				agent, err := router.HostingAgent(ctx)
+				agent, err := GetHostingAgent(ctx, nbClient, lr)
 				require.NoError(t, err)
 				assert.Equal(t, tt.expectedInitialAgent, agent)
 			}
 
-			err = router.Failover(ctx)
+			err = Failover(ctx, nbClient, router)
 
 			if tt.expectError {
 				require.Error(t, err)
@@ -641,7 +642,7 @@ func TestRouter_Failover(t *testing.T) {
 				require.NoError(t, err)
 
 				if tt.expectedFailoverAgent != "" {
-					agent, err := router.HostingAgent(ctx)
+					agent, err := GetHostingAgent(ctx, nbClient, lr)
 					require.NoError(t, err)
 					assert.Equal(t, tt.expectedFailoverAgent, agent)
 				}

@@ -26,13 +26,13 @@ type ResourceList struct {
 type Resource interface {
 	// Name returns the resource name (e.g., "routers")
 	Name() string
-	
+
 	// Aliases returns alternative names for the resource (e.g., ["router"] for "routers")
 	Aliases() []string
-	
+
 	// List fetches resources and returns them as a runtime.Object list
 	List(ctx context.Context, client client.Client, names []string) (runtime.Object, error)
-	
+
 	// GetTable converts a runtime.Object list to a table representation
 	GetTable(obj runtime.Object) (*metav1.Table, error)
 }
@@ -52,7 +52,7 @@ func NewRegistry() *Registry {
 // Register adds a resource to the registry
 func (r *Registry) Register(resource Resource) {
 	r.resources[resource.Name()] = resource
-	
+
 	// Also register aliases
 	for _, alias := range resource.Aliases() {
 		r.resources[alias] = resource
@@ -69,14 +69,14 @@ func (r *Registry) Get(name string) (Resource, bool) {
 func (r *Registry) List() []string {
 	seen := make(map[Resource]bool)
 	var names []string
-	
+
 	for name, resource := range r.resources {
 		if !seen[resource] && name == resource.Name() {
 			names = append(names, name)
 			seen[resource] = true
 		}
 	}
-	
+
 	return names
 }
 
@@ -84,12 +84,12 @@ func (r *Registry) List() []string {
 type OVNConfig struct {
 	Endpoints []string
 	Namespace string
-	
+
 	// For northbound database
 	NBStatefulSet string
 	NBPort        string
-	
-	// For southbound database  
+
+	// For southbound database
 	SBStatefulSet string
 	SBPort        string
 }
@@ -110,7 +110,7 @@ func (c *OVNConfig) GetNBEndpoints() []string {
 	if len(c.Endpoints) > 0 {
 		return c.Endpoints
 	}
-	
+
 	// Generate default endpoints
 	return []string{
 		"tcp:" + c.NBStatefulSet + "-0." + c.NBStatefulSet + "." + c.Namespace + ".svc.cluster.local:" + c.NBPort,
@@ -124,7 +124,7 @@ func (c *OVNConfig) GetSBEndpoints() []string {
 	if len(c.Endpoints) > 0 {
 		return c.Endpoints
 	}
-	
+
 	// Generate default endpoints
 	return []string{
 		"tcp:" + c.SBStatefulSet + "-0." + c.SBStatefulSet + "." + c.Namespace + ".svc.cluster.local:" + c.SBPort,
@@ -135,9 +135,9 @@ func (c *OVNConfig) GetSBEndpoints() []string {
 
 // GetOptions contains common options for get operations
 type GetOptions struct {
-	ConfigFlags   *genericclioptions.ConfigFlags
-	OVNConfig     *OVNConfig
-	OutputFormat  string
-	NoHeaders     bool
-	Out           io.Writer
+	ConfigFlags  *genericclioptions.ConfigFlags
+	OVNConfig    *OVNConfig
+	OutputFormat string
+	NoHeaders    bool
+	Out          io.Writer
 }

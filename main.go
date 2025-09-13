@@ -4,6 +4,7 @@ import (
 	"os"
 
 	"github.com/charmbracelet/log"
+
 	"github.com/vexxhost/atmosphere/internal/cli"
 )
 

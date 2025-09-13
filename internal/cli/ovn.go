@@ -38,7 +38,7 @@ func defaultOVNOptions() *ovnCmdOptions {
 // newOVNNbctlCmd creates the ovn-nbctl subcommand
 func newOVNNbctlCmd(configFlags *genericclioptions.ConfigFlags) *cobra.Command {
 	opts := defaultOVNOptions()
-	
+
 	cmd := &cobra.Command{
 		Use:                "ovn-nbctl [args...]",
 		Short:              "Execute ovn-nbctl commands on the OVN northbound database",
@@ -47,18 +47,18 @@ func newOVNNbctlCmd(configFlags *genericclioptions.ConfigFlags) *cobra.Command {
 			return runOVNCommand(configFlags, "nb", args, opts)
 		},
 	}
-	
+
 	// Add flags for OVN configuration
 	cmd.Flags().StringVar(&opts.namespace, "ovn-namespace", opts.namespace, "Namespace where OVN is deployed")
 	cmd.Flags().StringSliceVar(&opts.endpoints, "ovn-endpoints", nil, "OVN database endpoints (default: auto-generated)")
-	
+
 	return cmd
 }
 
 // newOVNSbctlCmd creates the ovn-sbctl subcommand
 func newOVNSbctlCmd(configFlags *genericclioptions.ConfigFlags) *cobra.Command {
 	opts := defaultOVNOptions()
-	
+
 	cmd := &cobra.Command{
 		Use:                "ovn-sbctl [args...]",
 		Short:              "Execute ovn-sbctl commands on the OVN southbound database",
@@ -67,11 +67,11 @@ func newOVNSbctlCmd(configFlags *genericclioptions.ConfigFlags) *cobra.Command {
 			return runOVNCommand(configFlags, "sb", args, opts)
 		},
 	}
-	
+
 	// Add flags for OVN configuration
 	cmd.Flags().StringVar(&opts.namespace, "ovn-namespace", opts.namespace, "Namespace where OVN is deployed")
 	cmd.Flags().StringSliceVar(&opts.endpoints, "ovn-endpoints", nil, "OVN database endpoints (default: auto-generated)")
-	
+
 	return cmd
 }
 

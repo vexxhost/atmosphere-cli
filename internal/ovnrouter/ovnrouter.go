@@ -21,7 +21,19 @@ import (
 	apiv1alpha1 "github.com/vexxhost/atmosphere/apis/v1alpha1"
 )
 
-func convertToRouter(ctx context.Context, c client.Client, lr *nbdb.LogicalRouter) (*apiv1alpha1.Router, error) {
+// Manager provides methods for managing OVN routers
+type Manager struct {
+	client client.Client
+}
+
+// NewManager creates a new Manager instance with the given OVN client
+func NewManager(c client.Client) *Manager {
+	return &Manager{
+		client: c,
+	}
+}
+
+func (m *Manager) convertToRouter(ctx context.Context, lr *nbdb.LogicalRouter) (*apiv1alpha1.Router, error) {
 	routerUUID := strings.TrimPrefix(lr.Name, "neutron-")
 	uuid := types.UID(routerUUID)
 
@@ -48,7 +60,7 @@ func convertToRouter(ctx context.Context, c client.Client, lr *nbdb.LogicalRoute
 
 	for _, portUUID := range lr.Ports {
 		lrp := nbdb.LogicalRouterPort{UUID: portUUID}
-		if err := c.Get(ctx, &lrp); err != nil {
+		if err := m.client.Get(ctx, &lrp); err != nil {
 			return nil, fmt.Errorf("failed to get logical router port %q for router %q: %w", portUUID, lr.Name, err)
 		}
 
@@ -67,9 +79,10 @@ func convertToRouter(ctx context.Context, c client.Client, lr *nbdb.LogicalRoute
 	return router, nil
 }
 
-func GetByUUID(ctx context.Context, c client.Client, uuid types.UID) (*apiv1alpha1.Router, error) {
+// GetByUUID retrieves a router by its UUID
+func (m *Manager) GetByUUID(ctx context.Context, uuid types.UID) (*apiv1alpha1.Router, error) {
 	lrs := []nbdb.LogicalRouter{}
-	if err := c.Where(&nbdb.LogicalRouter{Name: fmt.Sprintf("neutron-%s", uuid)}).List(ctx, &lrs); err != nil {
+	if err := m.client.Where(&nbdb.LogicalRouter{Name: fmt.Sprintf("neutron-%s", uuid)}).List(ctx, &lrs); err != nil {
 		return nil, fmt.Errorf("failed to get router %q: %w", uuid, err)
 	}
 
@@ -77,13 +90,13 @@ func GetByUUID(ctx context.Context, c client.Client, uuid types.UID) (*apiv1alph
 		return nil, fmt.Errorf("router %q not found", uuid)
 	}
 
-	return convertToRouter(ctx, c, &lrs[0])
+	return m.convertToRouter(ctx, &lrs[0])
 }
 
 // List retrieves all routers from OVN
-func List(ctx context.Context, c client.Client) (*apiv1alpha1.RouterList, error) {
+func (m *Manager) List(ctx context.Context) (*apiv1alpha1.RouterList, error) {
 	var routers []nbdb.LogicalRouter
-	if err := c.List(ctx, &routers); err != nil {
+	if err := m.client.List(ctx, &routers); err != nil {
 		return nil, err
 	}
 
@@ -96,7 +109,7 @@ func List(ctx context.Context, c client.Client) (*apiv1alpha1.RouterList, error)
 	}
 
 	for _, lr := range routers {
-		router, err := convertToRouter(ctx, c, &lr)
+		router, err := m.convertToRouter(ctx, &lr)
 		if err != nil {
 			continue
 		}
@@ -108,12 +121,12 @@ func List(ctx context.Context, c client.Client) (*apiv1alpha1.RouterList, error)
 }
 
 // GetLogicalRouterPorts retrieves all logical router ports for a given router
-func GetLogicalRouterPorts(ctx context.Context, c client.Client, router *apiv1alpha1.Router) ([]nbdb.LogicalRouterPort, error) {
+func (m *Manager) GetLogicalRouterPorts(ctx context.Context, router *apiv1alpha1.Router) ([]nbdb.LogicalRouterPort, error) {
 	result := make([]nbdb.LogicalRouterPort, 0, len(router.Status.Ports))
 
 	for _, port := range router.Status.Ports {
 		lrp := nbdb.LogicalRouterPort{UUID: string(*port.InternalUUID)}
-		if err := c.Get(ctx, &lrp); err != nil {
+		if err := m.client.Get(ctx, &lrp); err != nil {
 			return nil, fmt.Errorf("failed to get logical router port %q for router %q: %w", port.UUID, router.UID, err)
 		}
 
@@ -124,8 +137,8 @@ func GetLogicalRouterPorts(ctx context.Context, c client.Client, router *apiv1al
 }
 
 // GetGatewayChassis retrieves all gateway chassis for a router
-func GetGatewayChassis(ctx context.Context, c client.Client, router *apiv1alpha1.Router) ([]nbdb.GatewayChassis, error) {
-	lrps, err := GetLogicalRouterPorts(ctx, c, router)
+func (m *Manager) GetGatewayChassis(ctx context.Context, router *apiv1alpha1.Router) ([]nbdb.GatewayChassis, error) {
+	lrps, err := m.GetLogicalRouterPorts(ctx, router)
 	if err != nil {
 		return nil, err
 	}
@@ -135,7 +148,7 @@ func GetGatewayChassis(ctx context.Context, c client.Client, router *apiv1alpha1
 	for _, lrp := range lrps {
 		for _, gcUUID := range lrp.GatewayChassis {
 			gc := nbdb.GatewayChassis{UUID: gcUUID}
-			if err := c.Get(ctx, &gc); err != nil {
+			if err := m.client.Get(ctx, &gc); err != nil {
 				return nil, fmt.Errorf("failed to get gateway chassis %q for logical router port %q: %w", gcUUID, lrp.UUID, err)
 			}
 
@@ -147,8 +160,8 @@ func GetGatewayChassis(ctx context.Context, c client.Client, router *apiv1alpha1
 }
 
 // GetHostingAgent retrieves the name of the agent hosting the router
-func GetHostingAgent(ctx context.Context, c client.Client, router *apiv1alpha1.Router) (string, error) {
-	lrps, err := GetLogicalRouterPorts(ctx, c, router)
+func (m *Manager) GetHostingAgent(ctx context.Context, router *apiv1alpha1.Router) (string, error) {
+	lrps, err := m.GetLogicalRouterPorts(ctx, router)
 	if err != nil {
 		return "", err
 	}
@@ -213,8 +226,8 @@ func GetHostingAgent(ctx context.Context, c client.Client, router *apiv1alpha1.R
 //
 // The function requires at least 2 gateway chassis to perform a failover.
 // Returns an error if no gateway chassis are found or if only one exists.
-func Failover(ctx context.Context, c client.Client, router *apiv1alpha1.Router) error {
-	gcs, err := GetGatewayChassis(ctx, c, router)
+func (m *Manager) Failover(ctx context.Context, router *apiv1alpha1.Router) error {
+	gcs, err := m.GetGatewayChassis(ctx, router)
 	if err != nil {
 		return err
 	}
@@ -255,7 +268,7 @@ func Failover(ctx context.Context, c client.Client, router *apiv1alpha1.Router) 
 
 	var operations []ovsdb.Operation
 	for _, update := range updates {
-		ops, err := c.Where(update).Update(update)
+		ops, err := m.client.Where(update).Update(update)
 		if err != nil {
 			return fmt.Errorf("failed to prepare update for gateway chassis: %w", err)
 		}
@@ -263,7 +276,7 @@ func Failover(ctx context.Context, c client.Client, router *apiv1alpha1.Router) 
 		operations = append(operations, ops...)
 	}
 
-	results, err := c.Transact(ctx, operations...)
+	results, err := m.client.Transact(ctx, operations...)
 	if err != nil {
 		return fmt.Errorf("failed to update gateway chassis priorities: %w", err)
 	}
@@ -283,7 +296,7 @@ func Failover(ctx context.Context, c client.Client, router *apiv1alpha1.Router) 
 		case <-ctx.Done():
 			return fmt.Errorf("failed waiting for router %q to failover to %q: %w", router.UID, expectedHost, ctx.Err())
 		case <-ticker.C:
-			currentHost, err := GetHostingAgent(ctx, c, router)
+			currentHost, err := m.GetHostingAgent(ctx, router)
 			if err != nil {
 				continue
 			}

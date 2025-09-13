@@ -115,12 +115,15 @@ func (f *FailoverCmd) run(cmd *cobra.Command, args []string) error {
 	}
 	defer ovnClient.Close()
 
+	// Create router manager
+	routerManager := ovnrouter.NewManager(ovnClient)
+
 	// Get routers to failover
 	var routers []apiv1alpha1.Router
 
 	if f.all {
 		// Get all routers
-		routerList, err := ovnrouter.List(ctx, ovnClient)
+		routerList, err := routerManager.List(ctx)
 		if err != nil {
 			return fmt.Errorf("failed to list routers: %w", err)
 		}
@@ -128,7 +131,7 @@ func (f *FailoverCmd) run(cmd *cobra.Command, args []string) error {
 		fmt.Printf("Found %d routers to failover\n", len(routers))
 	} else {
 		// Get specific routers by UUID
-		allRouters, err := ovnrouter.List(ctx, ovnClient)
+		allRouters, err := routerManager.List(ctx)
 		if err != nil {
 			return fmt.Errorf("failed to list routers: %w", err)
 		}
@@ -169,7 +172,7 @@ func (f *FailoverCmd) run(cmd *cobra.Command, args []string) error {
 
 		// Create a context with timeout for this specific failover
 		failoverCtx, cancel := context.WithTimeout(ctx, f.timeout)
-		err := ovnrouter.Failover(failoverCtx, ovnClient, &router)
+		err := routerManager.Failover(failoverCtx, &router)
 		cancel()
 
 		if err != nil {

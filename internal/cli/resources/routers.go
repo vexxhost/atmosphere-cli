@@ -29,8 +29,11 @@ func (r *RouterResource) Aliases() []string {
 
 // List fetches routers and returns them as a runtime.Object
 func (r *RouterResource) List(ctx context.Context, client client.Client, names []string) (runtime.Object, error) {
+	// Create router manager
+	routerManager := ovnrouter.NewManager(client)
+	
 	// Fetch all routers (they already have external IPs populated)
-	routerList, err := ovnrouter.List(ctx, client)
+	routerList, err := routerManager.List(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list routers: %w", err)
 	}

@@ -6,6 +6,7 @@ package ovnrouter
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -120,29 +121,6 @@ func (m *Manager) List(ctx context.Context) (*apiv1alpha1.RouterList, error) {
 	return result, nil
 }
 
-// GetGatewayChassis retrieves all gateway chassis for a router
-func (m *Manager) GetGatewayChassis(ctx context.Context, router *apiv1alpha1.Router) ([]nbdb.GatewayChassis, error) {
-	result := []nbdb.GatewayChassis{}
-
-	for _, port := range router.Status.Ports {
-		lrp := nbdb.LogicalRouterPort{UUID: string(*port.InternalUUID)}
-		if err := m.client.Get(ctx, &lrp); err != nil {
-			return nil, fmt.Errorf("failed to get logical router port %q for router %q: %w", port.UUID, router.UID, err)
-		}
-
-		for _, gcUUID := range lrp.GatewayChassis {
-			gc := nbdb.GatewayChassis{UUID: gcUUID}
-			if err := m.client.Get(ctx, &gc); err != nil {
-				return nil, fmt.Errorf("failed to get gateway chassis %q for logical router port %q: %w", gcUUID, lrp.UUID, err)
-			}
-
-			result = append(result, gc)
-		}
-	}
-
-	return result, nil
-}
-
 // GetHostingAgent retrieves the name of the agent hosting the router
 func (m *Manager) GetHostingAgent(ctx context.Context, router *apiv1alpha1.Router) (string, error) {
 	var agent string
@@ -206,9 +184,22 @@ func (m *Manager) GetHostingAgent(ctx context.Context, router *apiv1alpha1.Route
 // The function requires at least 2 gateway chassis to perform a failover.
 // Returns an error if no gateway chassis are found or if only one exists.
 func (m *Manager) Failover(ctx context.Context, router *apiv1alpha1.Router) error {
-	gcs, err := m.GetGatewayChassis(ctx, router)
-	if err != nil {
-		return err
+	gcs := []nbdb.GatewayChassis{}
+
+	for _, port := range router.Status.Ports {
+		lrp := nbdb.LogicalRouterPort{UUID: string(*port.InternalUUID)}
+		if err := m.client.Get(ctx, &lrp); err != nil {
+			return fmt.Errorf("failed to get logical router port %q for router %q: %w", port.UUID, router.UID, err)
+		}
+
+		result := []nbdb.GatewayChassis{}
+		if err := m.client.WhereCache(func(gc *nbdb.GatewayChassis) bool {
+			return slices.Contains(lrp.GatewayChassis, gc.UUID)
+		}).List(ctx, &gcs); err != nil {
+			return fmt.Errorf("failed to list gateway chassis for logical router port %q: %w", lrp.UUID, err)
+		}
+
+		gcs = append(gcs, result...)
 	}
 
 	if len(gcs) == 0 {

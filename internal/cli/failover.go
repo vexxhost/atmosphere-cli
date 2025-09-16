@@ -200,8 +200,10 @@ func (f *FailoverCmd) connectToOVN(ctx context.Context) (client.Client, error) {
 	// Get database model
 	dbModel, err := model.NewClientDBModel("OVN_Northbound", map[string]model.Model{
 		nbdb.GatewayChassisTable:    &nbdb.GatewayChassis{},
-		nbdb.LogicalRouterTable:     &nbdb.LogicalRouter{},
+		nbdb.HAChassisGroupTable:    &nbdb.HAChassisGroup{},
+		nbdb.HAChassisTable:         &nbdb.HAChassis{},
 		nbdb.LogicalRouterPortTable: &nbdb.LogicalRouterPort{},
+		nbdb.LogicalRouterTable:     &nbdb.LogicalRouter{},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to get database model: %w", err)
@@ -214,6 +216,7 @@ func (f *FailoverCmd) connectToOVN(ctx context.Context) (client.Client, error) {
 	ovnClient, err := client.NewOVSDBClient(
 		dbModel,
 		client.WithEndpoint(strings.Join(endpoints, ",")),
+		client.WithLeaderOnly(true),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create OVN client: %w", err)

@@ -184,63 +184,120 @@ func (m *Manager) GetHostingAgent(ctx context.Context, router *apiv1alpha1.Route
 // The function requires at least 2 gateway chassis to perform a failover.
 // Returns an error if no gateway chassis are found or if only one exists.
 func (m *Manager) Failover(ctx context.Context, router *apiv1alpha1.Router) error {
-	gcs := []nbdb.GatewayChassis{}
-
+	var gatewayPortInfo *apiv1alpha1.RouterPortInfo
 	for _, port := range router.Status.Ports {
-		lrp := nbdb.LogicalRouterPort{UUID: string(*port.InternalUUID)}
-		if err := m.client.Get(ctx, &lrp); err != nil {
-			return fmt.Errorf("failed to get logical router port %q for router %q: %w", port.UUID, router.UID, err)
+		if port.IsGateway {
+			gatewayPortInfo = &port
+			break
+		}
+	}
+
+	lrp := nbdb.LogicalRouterPort{UUID: string(*gatewayPortInfo.InternalUUID)}
+	if err := m.client.Get(ctx, &lrp); err != nil {
+		return fmt.Errorf("failed to get logical router port %q for router %q: %w", gatewayPortInfo.UUID, router.UID, err)
+	}
+
+	var updates []model.Model
+	var expectedHost string
+
+	if lrp.HaChassisGroup != nil {
+		haChassisGroup := nbdb.HAChassisGroup{UUID: *lrp.HaChassisGroup}
+		if err := m.client.Get(ctx, &haChassisGroup); err != nil {
+			return fmt.Errorf("failed to get HA chassis group %q for logical router port %q: %w", lrp.HaChassisGroup, lrp.UUID, err)
 		}
 
-		result := []nbdb.GatewayChassis{}
+		haChassis := []nbdb.HAChassis{}
+		if err := m.client.WhereCache(func(hc *nbdb.HAChassis) bool {
+			return slices.Contains(haChassisGroup.HaChassis, hc.UUID)
+		}).List(ctx, &haChassis); err != nil {
+			return fmt.Errorf("failed to list HA chassis for HA chassis group %q: %w", haChassisGroup.UUID, err)
+		}
+
+		if len(haChassis) == 0 {
+			return fmt.Errorf("no HA chassis found for router %q", router.UID)
+		}
+
+		if len(haChassis) == 1 {
+			return fmt.Errorf("only one HA chassis found for router %q, cannot failover", router.UID)
+		}
+
+		sort.Slice(haChassis, func(i, j int) bool {
+			return haChassis[i].Priority < haChassis[j].Priority
+		})
+
+		// The `nextHaChassis` is the one with the lowest priority which will become active
+		// The `currentHaChassis` is the one with the highest priority which is currently active
+		nextHaChassis := &haChassis[0]
+		currentHaChassis := &haChassis[len(haChassis)-1]
+
+		if nextHaChassis.UUID == currentHaChassis.UUID {
+			return fmt.Errorf("unable to determine HA chassis to swap for router %q", router.UID)
+		}
+
+		updates = []model.Model{
+			&nbdb.HAChassis{
+				UUID:     currentHaChassis.UUID,
+				Priority: nextHaChassis.Priority,
+			},
+			&nbdb.HAChassis{
+				UUID:     nextHaChassis.UUID,
+				Priority: currentHaChassis.Priority,
+			},
+		}
+
+		expectedHost = nextHaChassis.ChassisName
+	} else if len(lrp.GatewayChassis) != 0 {
+		gcs := []nbdb.GatewayChassis{}
 		if err := m.client.WhereCache(func(gc *nbdb.GatewayChassis) bool {
 			return slices.Contains(lrp.GatewayChassis, gc.UUID)
 		}).List(ctx, &gcs); err != nil {
 			return fmt.Errorf("failed to list gateway chassis for logical router port %q: %w", lrp.UUID, err)
 		}
 
-		gcs = append(gcs, result...)
-	}
+		if len(gcs) == 0 {
+			return fmt.Errorf("no gateway chassis found for router %q", router.UID)
+		}
 
-	if len(gcs) == 0 {
-		return fmt.Errorf("no gateway chassis found for router %q", router.UID)
-	}
+		if len(gcs) == 1 {
+			return fmt.Errorf("only one gateway chassis found for router %q, cannot failover", router.UID)
+		}
 
-	if len(gcs) == 1 {
-		return fmt.Errorf("only one gateway chassis found for router %q, cannot failover", router.UID)
-	}
+		// Sort the gateway chassis by priority from lowest to the highest
+		sort.Slice(gcs, func(i, j int) bool {
+			return gcs[i].Priority < gcs[j].Priority
+		})
 
-	// Sort the gateway chassis by priority from lowest to the highest
-	sort.Slice(gcs, func(i, j int) bool {
-		return gcs[i].Priority < gcs[j].Priority
-	})
+		// The `nextGC` is the one with the lowest priority which will become active
+		// The `currentGC` is the one with the highest priority which is currently active
+		nextGC := &gcs[0]
+		currentGC := &gcs[len(gcs)-1]
 
-	// The `nextGC` is the one with the lowest priority which will become active
-	// The `currentGC` is the one with the highest priority which is currently active
-	nextGC := &gcs[0]
-	currentGC := &gcs[len(gcs)-1]
+		if nextGC.UUID == currentGC.UUID {
+			return fmt.Errorf("unable to determine gateway chassis to swap for router %q", router.UID)
+		}
 
-	if nextGC.UUID == currentGC.UUID {
-		return fmt.Errorf("unable to determine gateway chassis to swap for router %q", router.UID)
-	}
+		// Swap priorities between the current active and the next one
+		updates = []model.Model{
+			&nbdb.GatewayChassis{
+				UUID:     currentGC.UUID,
+				Priority: nextGC.Priority,
+			},
+			&nbdb.GatewayChassis{
+				UUID:     nextGC.UUID,
+				Priority: currentGC.Priority,
+			},
+		}
 
-	// Swap priorities between the current active and the next one
-	updates := []model.Model{
-		&nbdb.GatewayChassis{
-			UUID:     currentGC.UUID,
-			Priority: nextGC.Priority,
-		},
-		&nbdb.GatewayChassis{
-			UUID:     nextGC.UUID,
-			Priority: currentGC.Priority,
-		},
+		expectedHost = nextGC.ChassisName
+	} else {
+		return fmt.Errorf("logical router port %q has neither gateway chassis nor HA chassis group configured", lrp.UUID)
 	}
 
 	var operations []ovsdb.Operation
 	for _, update := range updates {
 		ops, err := m.client.Where(update).Update(update)
 		if err != nil {
-			return fmt.Errorf("failed to prepare update for gateway chassis: %w", err)
+			return fmt.Errorf("failed to prepare update for %q: %w", update, err)
 		}
 
 		operations = append(operations, ops...)
@@ -248,15 +305,12 @@ func (m *Manager) Failover(ctx context.Context, router *apiv1alpha1.Router) erro
 
 	results, err := m.client.Transact(ctx, operations...)
 	if err != nil {
-		return fmt.Errorf("failed to update gateway chassis priorities: %w", err)
+		return fmt.Errorf("failed to update priorities: %w", err)
 	}
 
 	if _, err := ovsdb.CheckOperationResults(results, operations); err != nil {
 		return err
 	}
-
-	// The hosting agent should be the one in the `nextGC` now
-	expectedHost := nextGC.ChassisName
 
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
@@ -267,6 +321,7 @@ func (m *Manager) Failover(ctx context.Context, router *apiv1alpha1.Router) erro
 			return fmt.Errorf("failed waiting for router %q to failover to %q: %w", router.UID, expectedHost, ctx.Err())
 		case <-ticker.C:
 			currentHost, err := m.GetHostingAgent(ctx, router)
+			fmt.Println(currentHost)
 			if err != nil {
 				continue
 			}

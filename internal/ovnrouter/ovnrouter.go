@@ -192,6 +192,10 @@ func (m *Manager) Failover(ctx context.Context, router *apiv1alpha1.Router) erro
 		}
 	}
 
+	if gatewayPortInfo == nil {
+		return fmt.Errorf("no gateway chassis found for router %q", router.UID)
+	}
+
 	lrp := nbdb.LogicalRouterPort{UUID: string(*gatewayPortInfo.InternalUUID)}
 	if err := m.client.Get(ctx, &lrp); err != nil {
 		return fmt.Errorf("failed to get logical router port %q for router %q: %w", gatewayPortInfo.UUID, router.UID, err)
@@ -203,7 +207,7 @@ func (m *Manager) Failover(ctx context.Context, router *apiv1alpha1.Router) erro
 	if lrp.HaChassisGroup != nil {
 		haChassisGroup := nbdb.HAChassisGroup{UUID: *lrp.HaChassisGroup}
 		if err := m.client.Get(ctx, &haChassisGroup); err != nil {
-			return fmt.Errorf("failed to get HA chassis group %q for logical router port %q: %w", lrp.HaChassisGroup, lrp.UUID, err)
+			return fmt.Errorf("failed to get HA chassis group %q for logical router port %q: %w", *lrp.HaChassisGroup, lrp.UUID, err)
 		}
 
 		haChassis := []nbdb.HAChassis{}

@@ -6,6 +6,9 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+
 jobs:
   golangci-lint:
     runs-on: ubuntu-latest

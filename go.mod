@@ -7,7 +7,7 @@ toolchain go1.24.4
 require (
 	github.com/charmbracelet/log v0.4.2
 	github.com/ovn-org/libovsdb v0.6.1-0.20240125124854-03f787b1a892
-	github.com/ovn-org/ovn-kubernetes/go-controller v0.0.0-20240514131704-c37f1c3cfa6b
+	github.com/ovn-org/ovn-kubernetes/go-controller v0.0.0-20260904165117-d6a3812d1bc1
 	github.com/spf13/cobra v1.9.1
 	github.com/stretchr/testify v1.10.0
 	k8s.io/api v0.33.3
